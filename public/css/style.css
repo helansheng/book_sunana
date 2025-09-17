@@ -78,6 +78,7 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
     margin-left: 5px;
 }
 
+/* public/css/style.css */
 .scrape-btn {
     background-color: #9b59b6; /* 使用紫色，代表特殊功能 */
     color: white;
@@ -100,7 +101,9 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
     flex-wrap: wrap;
     gap: 10px;
     margin-top: 10px;
-    width: 100%; /* 确保换行 */
+    /* 确保这个容器在 links-container 内部能够正确布局 */
+    flex-basis: 100%; 
+    height: auto;
 }
 .direct-download-link {
     background-color: #2ecc71;
