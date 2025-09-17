@@ -77,3 +77,44 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
     color: #7f8c8d; /* 使用一种柔和的灰色 */
     margin-left: 5px;
 }
+
+.scrape-btn {
+    background-color: #9b59b6; /* 使用紫色，代表特殊功能 */
+    color: white;
+    padding: 10px 18px;
+    border: none;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+.scrape-btn:hover {
+    background-color: #8e44ad;
+}
+.scrape-btn:disabled {
+    background-color: #bdc3c7;
+    cursor: not-allowed;
+}
+.direct-links-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+    width: 100%; /* 确保换行 */
+}
+.direct-download-link {
+    background-color: #2ecc71;
+    color: white !important;
+    padding: 5px 10px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-weight: bold;
+}
+.direct-download-link:hover {
+    background-color: #27ae60;
+}
+.scrape-not-found {
+    color: #95a5a6;
+    font-style: italic;
+    font-size: 0.9em;
+}
