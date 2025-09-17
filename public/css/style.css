@@ -91,3 +91,37 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
     .main-container { padding: 20px; }
     header h1 { font-size: 2rem; }
 }
+/* public/css/style.css */
+.links-wrapper {
+    position: relative;
+    display: inline-block;
+}
+.toggle-btn {
+    padding: 10px 18px;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+}
+.toggle-btn[data-target^="anna-archive"] {
+    background-color: #3498db;
+}
+.toggle-btn[data-target^="anna-archive"]:hover {
+    background-color: #2980b9;
+}
+.toggle-btn[data-target^="z-library"] {
+    background-color: #f39c12;
+}
+.toggle-btn[data-target^="z-library"]:hover {
+    background-color: #e67e22;
+}
+.official-link {
+    font-weight: bold;
+    background-color: #ecf0f1;
+}
+.official-link::after {
+    content: '?';
+    margin-left: 5px;
+}
