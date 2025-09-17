@@ -63,3 +63,17 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
     .main-container { padding: 20px; }
     header h1 { font-size: 2rem; }
 }
+
+/* 新增：为备用链接中的特殊说明添加样式 */
+.fallback-item-with-note {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-right: 10px;
+    margin-bottom: 5px;
+}
+.fallback-note {
+    font-size: 0.8em;
+    color: #7f8c8d; /* 使用一种柔和的灰色 */
+    margin-left: 5px;
+}
