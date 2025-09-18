@@ -1,4 +1,4 @@
-/* public/css/style.css - 最终修正版 */
+/* public/css/style.css - 优化中文网站按钮样式 */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;700&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Noto Sans SC', sans-serif; color: #333; background-color: #f4f7f6; line-height: 1.6; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 20px; }
@@ -78,46 +78,113 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
     margin-left: 5px;
 }
 
-/* public/css/style.css */
-.scrape-btn {
-    background-color: #9b59b6; /* 使用紫色，代表特殊功能 */
-    color: white;
-    padding: 10px 18px;
-    border: none;
-    border-radius: 5px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-.scrape-btn:hover {
-    background-color: #8e44ad;
-}
-.scrape-btn:disabled {
-    background-color: #bdc3c7;
-    cursor: not-allowed;
-}
-.direct-links-container {
+/* 中文网站按钮样式优化 */
+.chinese-sites-container {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    margin-top: 10px;
-    /* 确保这个容器在 links-container 内部能够正确布局 */
-    flex-basis: 100%; 
-    height: auto;
+    margin-top: 15px;
+    width: 100%;
 }
-.direct-download-link {
-    background-color: #2ecc71;
-    color: white !important;
-    padding: 5px 10px;
-    border-radius: 4px;
-    text-decoration: none;
+
+.scrape-btn {
+    padding: 12px 16px;
+    border: none;
+    border-radius: 6px;
     font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 140px;
+    font-size: 0.95rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
-.direct-download-link:hover {
+
+.scrape-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.scrape-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* 小立盘按钮样式 */
+.scrape-btn[data-target="xiaolipan"] {
+    background-color: #3498db;
+    color: white;
+}
+
+.scrape-btn[data-target="xiaolipan"]:hover:not(:disabled) {
+    background-color: #2980b9;
+}
+
+/* Book5678按钮样式 */
+.scrape-btn[data-target="book5678"] {
+    background-color: #2ecc71;
+    color: white;
+}
+
+.scrape-btn[data-target="book5678"]:hover:not(:disabled) {
     background-color: #27ae60;
 }
+
+/* 35PPT按钮样式 */
+.scrape-btn[data-target="35ppt"] {
+    background-color: #9b59b6;
+    color: white;
+}
+
+.scrape-btn[data-target="35ppt"]:hover:not(:disabled) {
+    background-color: #8e44ad;
+}
+
+.direct-links-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 15px;
+    width: 100%;
+}
+
+.book-link-item {
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    border-left: 3px solid #3498db;
+}
+
+.book-detail-link {
+    color: #2c3e50;
+    text-decoration: none;
+    font-weight: 500;
+    display: block;
+}
+
+.book-detail-link:hover {
+    color: #3498db;
+    text-decoration: underline;
+}
+
 .scrape-not-found {
     color: #95a5a6;
     font-style: italic;
     font-size: 0.9em;
+    padding: 10px;
+}
+
+/* 响应式调整 */
+@media (max-width: 600px) {
+    .chinese-sites-container {
+        flex-direction: column;
+    }
+    
+    .scrape-btn {
+        width: 100%;
+    }
 }
