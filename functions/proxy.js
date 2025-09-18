@@ -1,12 +1,11 @@
-// /functions/proxy.js - 终极形态：智能API代理 + 增强版ManyBooks爬虫
+// /functions/proxy.js - 直接处理ManyBooks爬取，不依赖第三方API
 
 // =======================================================
-// 主路由函数：根据请求类型分发任务
+// 主路由函数
 // =======================================================
 export async function onRequest(context) {
     const { request } = context;
 
-    // 我们只处理POST请求，通过请求体内容来区分任务类型
     if (request.method !== 'POST') {
         return new Response('Invalid request method. Only POST is accepted.', { status: 405 });
     }
@@ -15,12 +14,12 @@ export async function onRequest(context) {
         const requestData = await request.json();
         const { apiKey, body, scrapeTask } = requestData;
 
-        // 如果请求中包含 scrapeTask，则分发到爬虫处理器
+        // 处理 ManyBooks 爬取任务
         if (scrapeTask && scrapeTask.target === 'manybooks') {
             return handleManyBooksScraper(scrapeTask.query, scrapeTask.isbn);
         }
 
-        // 否则，正常处理 Gemini API 请求
+        // 处理 Gemini API 请求
         if (!apiKey || !body) {
             return new Response(JSON.stringify({ error: 'Missing apiKey or body for Gemini API call' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
         }
@@ -33,7 +32,7 @@ export async function onRequest(context) {
 }
 
 // =======================================================
-// 模式一：处理 Gemini API 的函数
+// 处理 Gemini API 的函数
 // =======================================================
 async function handleGeminiApiProxy(apiKey, body) {
     const modelName = 'gemini-2.5-pro';
@@ -52,127 +51,30 @@ async function handleGeminiApiProxy(apiKey, body) {
 }
 
 // =======================================================
-// 模式二：增强版ManyBooks爬虫函数
+// 直接处理ManyBooks爬取的函数
 // =======================================================
 async function handleManyBooksScraper(query, isbn) {
     try {
-        // 优化搜索策略：优先使用ISBN搜索（如果提供），其次使用查询词
-        let searchUrl;
-        if (isbn && isbn !== 'null' && isbn !== 'undefined') {
-            // 使用ISBN进行精确搜索
-            searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(isbn)}`;
-        } else {
-            // 使用查询词进行搜索，并添加"中文"或"Chinese"提高中文书籍匹配度
-            const enhancedQuery = `${query} ${query.match(/[\u4e00-\u9fff]/) ? '中文' : 'Chinese'}`;
-            searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(enhancedQuery)}`;
-        }
+        console.log(`开始ManyBooks搜索: ${query}, ISBN: ${isbn}`);
         
-        console.log(`ManyBooks搜索URL: ${searchUrl}`);
+        // 第一步: 搜索书籍获取详情页URL
+        const bookDetailUrl = await searchManyBooks(query, isbn);
         
-        const headers = { 
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': 'https://manybooks.net/',
-            'Connection': 'keep-alive'
-        };
-
-        // 第一步: 搜索书籍并获取详情页链接
-        const searchResponse = await fetch(searchUrl, { headers });
-        if (!searchResponse.ok) {
-            throw new Error(`ManyBooks搜索失败，状态码: ${searchResponse.status}`);
-        }
-
-        const searchHtml = await searchResponse.text();
-        let bookDetailUrl = null;
-
-        // 方法1: 使用正则表达式查找详情页链接（更健壮的方法）
-        const detailLinkRegex = /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*book-title[^"]*"[^>]*>/i;
-        const match = searchHtml.match(detailLinkRegex);
-        
-        if (match && match[1]) {
-            bookDetailUrl = new URL(match[1], 'https://manybooks.net').href;
-            console.log(`通过正则找到详情页: ${bookDetailUrl}`);
-        } else {
-            // 方法2: 使用HTMLRewriter作为备选方案
-            console.log("正则匹配失败，尝试HTMLRewriter...");
-            await new HTMLRewriter()
-                .on('a.book-title', {
-                    element(element) {
-                        if (!bookDetailUrl) {
-                            const href = element.getAttribute('href');
-                            if (href) {
-                                bookDetailUrl = new URL(href, 'https://manybooks.net').href;
-                                console.log(`通过HTMLRewriter找到详情页: ${bookDetailUrl}`);
-                            }
-                        }
-                    },
-                })
-                .transform(new Response(searchHtml))
-                .text();
-        }
-
         if (!bookDetailUrl) {
-            console.log("未找到匹配的书籍详情页");
-            // 尝试更宽松的搜索策略
-            return await fallbackSearchStrategy(query, isbn, headers);
+            console.log("未找到匹配的书籍");
+            return new Response(JSON.stringify([]), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
         }
-
-        // 第二步: 访问详情页并抓取下载链接
-        console.log(`访问详情页: ${bookDetailUrl}`);
-        const detailResponse = await fetch(bookDetailUrl, { headers });
-        if (!detailResponse.ok) {
-            throw new Error(`ManyBooks详情页访问失败，状态码: ${detailResponse.status}`);
-        }
-
-        const detailHtml = await detailResponse.text();
-        const downloadLinks = [];
-
-        // 方法1: 使用正则表达式提取下载链接
-        const downloadRegex = /<a[^>]*href="(\/download\/[^"]*)"[^>]*class="[^"]*btn[^"]*"[^>]*>([^<]*)<\/a>/gi;
-        let downloadMatch;
         
-        while ((downloadMatch = downloadRegex.exec(detailHtml)) !== null) {
-            const format = downloadMatch[2].trim();
-            const url = downloadMatch[1];
-            if (format && url) {
-                downloadLinks.push({
-                    format: format.toUpperCase(),
-                    url: new URL(url, 'https://manybooks.net').href
-                });
-                console.log(`找到下载链接: ${format} - ${url}`);
-            }
-        }
-
-        // 方法2: 如果正则没找到，使用HTMLRewriter作为备选
-        if (downloadLinks.length === 0) {
-            console.log("正则未找到下载链接，尝试HTMLRewriter...");
-            await new HTMLRewriter()
-                .on('a.btn', {
-                    element(element) {
-                        const href = element.getAttribute('href');
-                        if (href && href.includes('/download/')) {
-                            const format = element.getText({ text: true }).trim();
-                            downloadLinks.push({
-                                format: format.toUpperCase(),
-                                url: new URL(href, 'https://manybooks.net').href
-                            });
-                            console.log(`通过HTMLRewriter找到下载链接: ${format} - ${href}`);
-                        }
-                    },
-                })
-                .transform(new Response(detailHtml))
-                .text();
-        }
-
-        // 如果还是没找到，尝试查找其他可能的下载区域
-        if (downloadLinks.length === 0) {
-            console.log("在常规区域未找到下载链接，尝试查找其他区域...");
-            await findDownloadLinksInAlternativeAreas(detailHtml, downloadLinks);
-        }
-
-        // 返回找到的下载链接数组
+        console.log(`找到书籍详情页: ${bookDetailUrl}`);
+        
+        // 第二步: 访问详情页并处理可能的验证
+        const downloadLinks = await getDownloadLinks(bookDetailUrl);
+        
+        console.log(`获取到 ${downloadLinks.length} 个下载链接`);
+        
         return new Response(JSON.stringify(downloadLinks), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -191,215 +93,280 @@ async function handleManyBooksScraper(query, isbn) {
 }
 
 // =======================================================
-// 备用搜索策略（当主搜索失败时使用）
+// 搜索ManyBooks获取书籍详情页URL
 // =======================================================
-async function fallbackSearchStrategy(query, isbn, headers) {
-    console.log("启用备用搜索策略...");
-    
-    // 策略1: 尝试英文搜索
-    try {
-        // 将中文标题转换为拼音或可能的英文标题
-        let englishQuery = query;
-        // 这里可以添加中文到英文的简单映射（针对常见书籍）
-        const chineseToEnglishMap = {
-            "曾国藩的正面与侧面": "Zeng Guofan",
-            "活着": "To Live",
-            "三体": "Three Body Problem"
-            // 可以添加更多映射
-        };
-        
-        for (const [chinese, english] of Object.entries(chineseToEnglishMap)) {
-            if (query.includes(chinese)) {
-                englishQuery = english;
-                break;
-            }
-        }
-        
-        const searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(englishQuery)}`;
-        console.log(`尝试英文搜索: ${searchUrl}`);
-        
-        const searchResponse = await fetch(searchUrl, { headers });
-        if (!searchResponse.ok) throw new Error("英文搜索请求失败");
-        
-        const searchHtml = await searchResponse.text();
-        const detailLinkRegex = /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*book-title[^"]*"[^>]*>/i;
-        const match = searchHtml.match(detailLinkRegex);
-        
-        if (match && match[1]) {
-            const bookDetailUrl = new URL(match[1], 'https://manybooks.net').href;
-            console.log(`备用策略找到详情页: ${bookDetailUrl}`);
-            
-            // 访问详情页并获取下载链接（重用主函数中的逻辑）
-            const detailResponse = await fetch(bookDetailUrl, { headers });
-            if (!detailResponse.ok) throw new Error("详情页访问失败");
-            
-            const detailHtml = await detailResponse.text();
-            const downloadLinks = [];
-            
-            // 提取下载链接
-            const downloadRegex = /<a[^>]*href="(\/download\/[^"]*)"[^>]*class="[^"]*btn[^"]*"[^>]*>([^<]*)<\/a>/gi;
-            let downloadMatch;
-            
-            while ((downloadMatch = downloadRegex.exec(detailHtml)) !== null) {
-                const format = downloadMatch[2].trim();
-                const url = downloadMatch[1];
-                if (format && url) {
-                    downloadLinks.push({
-                        format: format.toUpperCase(),
-                        url: new URL(url, 'https://manybooks.net').href
-                    });
-                }
-            }
-            
-            if (downloadLinks.length > 0) {
-                return new Response(JSON.stringify(downloadLinks), {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                });
-            }
-        }
-    } catch (error) {
-        console.error("备用策略1失败:", error);
+async function searchManyBooks(query, isbn) {
+    // 构建搜索URL - 优先使用ISBN搜索（如果提供）
+    let searchUrl;
+    if (isbn && isbn !== 'null' && isbn !== 'undefined') {
+        searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(isbn)}`;
+    } else {
+        // 对于中文书籍，添加"中文"关键词提高匹配度
+        const enhancedQuery = hasChineseCharacters(query) ? `${query} 中文` : query;
+        searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(enhancedQuery)}`;
     }
     
-    // 策略2: 尝试作者搜索
-    try {
-        // 这里可以添加从书名提取作者的逻辑
-        // 例如，如果查询是"曾国藩的正面与侧面"，可以尝试搜索"曾国藩"
-        const authorMatch = query.match(/(.+?)的/) || query.match(/(.+?)(?:著|编|译)/);
-        if (authorMatch && authorMatch[1]) {
-            const author = authorMatch[1];
-            const searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(author)}`;
-            console.log(`尝试作者搜索: ${searchUrl}`);
-            
-            const searchResponse = await fetch(searchUrl, { headers });
-            if (!searchResponse.ok) throw new Error("作者搜索请求失败");
-            
-            const searchHtml = await searchResponse.text();
-            
-            // 尝试找到与原始查询最匹配的书籍
-            const bookListRegex = /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*book-title[^"]*"[^>]*>([^<]*)<\/a>/gi;
-            let bookMatch;
-            let bestMatchUrl = null;
-            let bestMatchScore = 0;
-            
-            while ((bookMatch = bookListRegex.exec(searchHtml)) !== null) {
-                const title = bookMatch[2];
-                const similarity = calculateSimilarity(query, title);
-                if (similarity > bestMatchScore) {
-                    bestMatchScore = similarity;
-                    bestMatchUrl = bookMatch[1];
-                }
-            }
-            
-            if (bestMatchUrl && bestMatchScore > 0.3) { // 相似度阈值
-                const bookDetailUrl = new URL(bestMatchUrl, 'https://manybooks.net').href;
-                console.log(`作者搜索找到最匹配的书籍: ${bookDetailUrl}, 相似度: ${bestMatchScore}`);
-                
-                // 访问详情页并获取下载链接
-                const detailResponse = await fetch(bookDetailUrl, { headers });
-                if (!detailResponse.ok) throw new Error("详情页访问失败");
-                
-                const detailHtml = await detailResponse.text();
-                const downloadLinks = [];
-                
-                // 提取下载链接
-                const downloadRegex = /<a[^>]*href="(\/download\/[^"]*)"[^>]*class="[^"]*btn[^"]*"[^>]*>([^<]*)<\/a>/gi;
-                let downloadMatch;
-                
-                while ((downloadMatch = downloadRegex.exec(detailHtml)) !== null) {
-                    const format = downloadMatch[2].trim();
-                    const url = downloadMatch[1];
-                    if (format && url) {
-                        downloadLinks.push({
-                            format: format.toUpperCase(),
-                            url: new URL(url, 'https://manybooks.net').href
-                        });
-                    }
-                }
-                
-                if (downloadLinks.length > 0) {
-                    return new Response(JSON.stringify(downloadLinks), {
-                        status: 200,
-                        headers: { 'Content-Type': 'application/json' },
-                    });
-                }
-            }
-        }
-    } catch (error) {
-        console.error("备用策略2失败:", error);
-    }
+    console.log(`搜索URL: ${searchUrl}`);
     
-    // 所有策略都失败，返回空结果
-    return new Response(JSON.stringify([]), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-    });
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://manybooks.net/',
+    };
+    
+    try {
+        const response = await fetch(searchUrl, { headers });
+        
+        if (!response.ok) {
+            throw new Error(`搜索请求失败: ${response.status}`);
+        }
+        
+        const html = await response.text();
+        
+        // 解析搜索结果，获取第一个匹配的书籍详情页URL
+        return parseSearchResults(html, query);
+        
+    } catch (error) {
+        console.error("搜索失败:", error);
+        return null;
+    }
 }
 
 // =======================================================
-// 在其他区域查找下载链接
+// 解析搜索结果获取书籍详情页URL
 // =======================================================
-async function findDownloadLinksInAlternativeAreas(html, downloadLinks) {
-    // 尝试查找其他可能的下载区域
-    // 1. 查找包含"download"字样的区域
-    const downloadSectionRegex = /<div[^>]*class="[^"]*download[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
-    const sectionMatch = html.match(downloadSectionRegex);
+function parseSearchResults(html, query) {
+    // 方法1: 使用正则表达式查找详情页链接
+    const regexPatterns = [
+        /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*book-title[^"]*"[^>]*>/i,
+        /<a[^>]*href="(\/book\/[^"]*)"[^>]*title="[^"]*"[^>]*>/i,
+        /<h3[^>]*>\s*<a[^>]*href="(\/book\/[^"]*)"[^>]*>/i
+    ];
     
-    if (sectionMatch) {
-        const sectionHtml = sectionMatch[1];
-        const linkRegex = /<a[^>]*href="(\/download\/[^"]*)"[^>]*>([^<]*)<\/a>/gi;
-        let linkMatch;
-        
-        while ((linkMatch = linkRegex.exec(sectionHtml)) !== null) {
-            const format = linkMatch[2].trim();
-            const url = linkMatch[1];
-            if (format && url) {
-                downloadLinks.push({
-                    format: format.toUpperCase(),
-                    url: new URL(url, 'https://manybooks.net').href
-                });
-                console.log(`在备用区域找到下载链接: ${format} - ${url}`);
-            }
+    for (const pattern of regexPatterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+            return new URL(match[1], 'https://manybooks.net').href;
         }
     }
     
-    // 2. 查找所有可能的下载链接（更宽松的匹配）
-    const allDownloadLinksRegex = /<a[^>]*href="(\/download[^"]*)"[^>]*>([^<]*)<\/a>/gi;
-    let allMatch;
+    // 方法2: 使用HTMLRewriter作为备选
+    let foundUrl = null;
+    const rewriter = new HTMLRewriter();
+    rewriter.on('a[href*="/book/"]', {
+        element(element) {
+            if (!foundUrl) {
+                const href = element.getAttribute('href');
+                const text = element.text;
+                
+                // 检查链接文本是否与查询相关
+                if (href && text && isRelevantResult(text, query)) {
+                    foundUrl = new URL(href, 'https://manybooks.net').href;
+                }
+            }
+        }
+    });
     
-    while ((allMatch = allDownloadLinksRegex.exec(html)) !== null) {
-        const format = allMatch[2].trim();
-        const url = allMatch[1];
-        // 过滤掉明显不是下载链接的URL
-        if (format && url && !url.includes('#')) {
+    // 消耗响应体来触发解析
+    rewriter.transform(new Response(html)).text();
+    
+    return foundUrl;
+}
+
+// =======================================================
+// 获取下载链接（处理验证流程）
+// =======================================================
+async function getDownloadLinks(bookUrl) {
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://manybooks.net/',
+    };
+    
+    try {
+        // 第一次访问详情页
+        let response = await fetch(bookUrl, { headers });
+        
+        if (!response.ok) {
+            throw new Error(`详情页请求失败: ${response.status}`);
+        }
+        
+        let html = await response.text();
+        
+        // 检查是否需要验证
+        if (requiresVerification(html)) {
+            console.log("检测到需要验证，尝试处理验证流程");
+            
+            // 提取验证表单数据
+            const verificationData = extractVerificationData(html);
+            
+            if (verificationData) {
+                // 提交验证表单
+                const formResponse = await submitVerification(verificationData, headers);
+                
+                if (formResponse.ok) {
+                    html = await formResponse.text();
+                } else {
+                    console.error("验证表单提交失败");
+                }
+            }
+        }
+        
+        // 解析下载链接
+        return parseDownloadLinksFromHtml(html);
+        
+    } catch (error) {
+        console.error("获取下载链接失败:", error);
+        return [];
+    }
+}
+
+// =======================================================
+// 检查页面是否需要验证
+// =======================================================
+function requiresVerification(html) {
+    // 检查是否存在常见的验证表单元素
+    const verificationIndicators = [
+        /age-verification/i,
+        /download-verification/i,
+        /confirm.*age/i,
+        /verify.*download/i,
+        /form.*action.*verify/i,
+        /form.*action.*confirm/i
+    ];
+    
+    return verificationIndicators.some(pattern => pattern.test(html));
+}
+
+// =======================================================
+// 提取验证表单数据
+// =======================================================
+function extractVerificationData(html) {
+    // 查找表单
+    const formRegex = /<form[^>]*action="([^"]*)"[^>]*method="([^"]*)"[^>]*>([\s\S]*?)<\/form>/i;
+    const formMatch = html.match(formRegex);
+    
+    if (!formMatch) {
+        return null;
+    }
+    
+    const action = formMatch[1];
+    const method = formMatch[2] || 'POST';
+    const formContent = formMatch[3];
+    
+    // 提取所有隐藏字段
+    const fieldRegex = /<input[^>]*type="hidden"[^>]*name="([^"]*)"[^>]*value="([^"]*)"[^>]*>/gi;
+    const fields = {};
+    let fieldMatch;
+    
+    while ((fieldMatch = fieldRegex.exec(formContent)) !== null) {
+        fields[fieldMatch[1]] = fieldMatch[2];
+    }
+    
+    // 提取提交按钮（如果需要）
+    const submitRegex = /<input[^>]*type="submit"[^>]*name="([^"]*)"[^>]*value="([^"]*)"[^>]*>/i;
+    const submitMatch = formContent.match(submitRegex);
+    if (submitMatch) {
+        fields[submitMatch[1]] = submitMatch[2];
+    }
+    
+    return {
+        action: action.startsWith('http') ? action : new URL(action, 'https://manybooks.net').href,
+        method: method,
+        fields: fields
+    };
+}
+
+// =======================================================
+// 提交验证表单
+// =======================================================
+async function submitVerification(verificationData, headers) {
+    const formData = new URLSearchParams();
+    for (const [key, value] of Object.entries(verificationData.fields)) {
+        formData.append(key, value);
+    }
+    
+    const requestOptions = {
+        method: verificationData.method,
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            ...headers
+        },
+        body: formData.toString()
+    };
+    
+    return await fetch(verificationData.action, requestOptions);
+}
+
+// =======================================================
+// 从HTML解析下载链接
+// =======================================================
+function parseDownloadLinksFromHtml(html) {
+    const downloadLinks = [];
+    
+    // 方法1: 使用正则表达式查找下载链接
+    const downloadRegex = /<a[^>]*href="(\/download\/[^"]*)"[^>]*>([^<]*)<\/a>/gi;
+    let downloadMatch;
+    
+    while ((downloadMatch = downloadRegex.exec(html)) !== null) {
+        const format = downloadMatch[2].trim();
+        const url = downloadMatch[1];
+        
+        if (format && url) {
             downloadLinks.push({
                 format: format.toUpperCase(),
                 url: new URL(url, 'https://manybooks.net').href
             });
-            console.log(`通过宽松匹配找到下载链接: ${format} - ${url}`);
         }
     }
+    
+    // 方法2: 如果正则没找到，尝试HTMLRewriter
+    if (downloadLinks.length === 0) {
+        const rewriter = new HTMLRewriter();
+        rewriter.on('a[href*="/download/"]', {
+            element(element) {
+                const href = element.getAttribute('href');
+                const text = element.text;
+                if (href && text) {
+                    downloadLinks.push({
+                        format: text.trim().toUpperCase(),
+                        url: new URL(href, 'https://manybooks.net').href
+                    });
+                }
+            }
+        });
+        
+        // 消耗响应体来触发解析
+        rewriter.transform(new Response(html)).text();
+    }
+    
+    return downloadLinks;
 }
 
 // =======================================================
-// 辅助函数：计算字符串相似度
+// 辅助函数
 // =======================================================
-function calculateSimilarity(str1, str2) {
-    // 简单实现：计算最长公共子序列长度与较长字符串长度的比值
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
+
+// 检查字符串是否包含中文字符
+function hasChineseCharacters(str) {
+    return /[\u4e00-\u9fff]/.test(str);
+}
+
+// 检查搜索结果是否与查询相关
+function isRelevantResult(resultText, query) {
+    // 简单实现：检查是否有共同词汇
+    const queryWords = query.toLowerCase().split(/\s+/);
+    const resultWords = resultText.toLowerCase().split(/\s+/);
     
-    if (longer.length === 0) return 1.0;
-    
-    // 检查是否包含关系
-    if (longer.includes(shorter)) return shorter.length / longer.length;
-    
-    // 简单相似度计算（可根据需要实现更复杂的算法）
-    let matchCount = 0;
-    for (let i = 0; i < shorter.length; i++) {
-        if (longer.includes(shorter[i])) matchCount++;
-    }
-    
-    return matchCount / longer.length;
+    return queryWords.some(word => 
+        word.length > 2 && resultWords.some(rWord => rWord.includes(word))
+    );
 }
