@@ -387,51 +387,56 @@
         }
     }
 
-    // =======================================================
-    // 事件监听器
-    // =======================================================
-    resultsContainer.addEventListener('click', async (event) => {
-        const target = event.target;
-        if (target.classList.contains('toggle-btn')) {
-            const targetId = target.dataset.target;
-            const dropdown = document.getElementById(targetId);
-            if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
-        }
-        if (target.classList.contains('scrape-btn')) {
-            const site = target.dataset.target;
-            const query = target.dataset.query;
-            const isbn = target.dataset.isbn;
-            const linksContainer = target.parentElement.parentElement.querySelector('.direct-links-container');
+// =======================================================
+// 事件监听器
+// =======================================================
+resultsContainer.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (target.classList.contains('toggle-btn')) {
+        const targetId = target.dataset.target;
+        const dropdown = document.getElementById(targetId);
+        if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+    }
+    if (target.classList.contains('scrape-btn')) {
+        const site = target.dataset.target;
+        const query = target.dataset.query;
+        const isbn = target.dataset.isbn;
+        const linksContainer = target.parentElement.parentElement.querySelector('.direct-links-container');
+        
+        target.textContent = '正在获取...';
+        target.disabled = true;
+        linksContainer.innerHTML = '';
+        
+        try {
+            const bookLinks = await fetchAIResponseWithProxy({ 
+                scrapeTask: { target: site, query, isbn } 
+            });
             
-            target.textContent = '正在获取...';
-            target.disabled = true;
-            linksContainer.innerHTML = '';
-            
-            try {
-                const directLinks = await fetchAIResponseWithProxy({ 
-                    scrapeTask: { target: site, query, isbn } 
+            if (bookLinks && Array.isArray(bookLinks) && bookLinks.length > 0) {
+                bookLinks.forEach(link => {
+                    const div = document.createElement('div');
+                    div.className = 'book-link-item';
+                    
+                    const a = document.createElement('a');
+                    a.href = link.url;
+                    a.textContent = `${link.site}: ${link.title}`;
+                    a.target = '_blank';
+                    a.className = 'book-detail-link';
+                    
+                    div.appendChild(a);
+                    linksContainer.appendChild(div);
                 });
-                
-                if (directLinks && Array.isArray(directLinks) && directLinks.length > 0) {
-                    directLinks.forEach(link => {
-                        const a = document.createElement('a');
-                        a.href = link.url;
-                        a.textContent = `${link.format} 下载`;
-                        a.target = '_blank';
-                        a.className = 'direct-download-link';
-                        linksContainer.appendChild(a);
-                    });
-                } else {
-                    linksContainer.innerHTML = `<span class="scrape-not-found">未找到直接下载资源。</span>`;
-                }
-            } catch (error) {
-                console.error(`${site} scraper failed:`, error);
-                linksContainer.innerHTML = `<span class="scrape-not-found">获取失败: ${error.message}</span>`;
-            } finally {
-                target.style.display = 'none';
+            } else {
+                linksContainer.innerHTML = `<span class="scrape-not-found">未找到相关书籍。</span>`;
             }
+        } catch (error) {
+            console.error(`${site} scraper failed:`, error);
+            linksContainer.innerHTML = `<span class="scrape-not-found">获取失败: ${error.message}</span>`;
+        } finally {
+            target.style.display = 'none';
         }
-    });
+    }
+});
 
     // =======================================================
     // 辅助函数
