@@ -1,1 +1,58 @@
-﻿<!DOCTYPE html><html lang="zh-CN"><head>    <meta charset="UTF-8">    <meta name="viewport" content="width=device-width, initial-scale=1.0">    <title>智能阅读助手 - Powered by Gemini</title>    <link rel="stylesheet" href="css/style.css"></head><body>    <button id="settings-btn" class="settings-btn" title="设置API Key">⚙️</button>    <div class="main-container">        <header>            <h1>智能阅读计划助手</h1>            <p>基于 Google Gemini & Anna's Archive</p>        </header>        <main>            <div class="search-container">                <label for="query-input">请输入您的阅读需求：</label>                <textarea id="query-input" rows="8" placeholder="例如：我想系统地学习一下心理学，从基础理论到一些有趣的应用分支，比如社会心理学，我完全是个新手。"></textarea>                <button id="search-btn">生成阅读计划</button>            </div>            <div id="info-box" class="info-box" style="display: none;">                <p>💡 **访问提示**: 部分图书资源网站在特定地区可能无法直接访问。我们已为您动态查找了多个可用访问路径，请逐一尝试。</p>            </div>            <div id="results-container" class="results-container">                <div id="loading-spinner" class="loading-spinner" style="display: none;"></div>            </div>        </main>        <footer>            <p>所有书籍资源均来自 Anna's Archive，请遵守相关版权法规。</p>        </footer>    </div>    <!-- 设置弹窗 -->    <div id="settings-modal" class="modal-overlay" style="display: none;">        <div class="modal-content">            <h2>API Key 管理</h2>            <p>您的API Key将仅存储在您的浏览器本地，不会上传至任何服务器。</p>            <div class="api-key-input-group">                <input type="password" id="api-key-input" placeholder="在此输入您的 Google Gemini API Key">                <button id="add-key-btn">添加</button>            </div>            <div class="api-key-list">                <h3>已保存的 Key：</h3>                <ul id="key-list-ul"></ul>            </div>            <button id="close-modal-btn" class="close-modal-btn">关闭</button>        </div>    </div>    <script src="js/main.js"></script></body></html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能阅读助手 - Powered by Gemini</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <button id="settings-btn" class="settings-btn" title="设置API Key">⚙️</button>
+
+    <div class="main-container">
+        <header>
+            <h1>智能阅读计划助手</h1>
+            <p>基于 Google Gemini & 多源图书资源</p>
+        </header>
+
+        <main>
+            <div class="search-container">
+                <label for="query-input">请输入您的阅读需求：</label>
+                <textarea id="query-input" rows="8" placeholder="例如：我想系统地学习一下心理学，从基础理论到一些有趣的应用分支，比如社会心理学，我完全是个新手。"></textarea>
+                <button id="search-btn">生成阅读计划</button>
+            </div>
+
+            <div id="info-box" class="info-box" style="display: none;">
+                <p>💡 **访问提示**: 部分图书资源网站在特定地区可能无法直接访问。我们已为您动态查找了多个可用访问路径，请逐一尝试。</p>
+            </div>
+
+            <div id="results-container" class="results-container">
+                <div id="loading-spinner" class="loading-spinner" style="display: none;"></div>
+            </div>
+        </main>
+
+        <footer>
+            <p>所有书籍资源均来自多个可靠来源，请遵守相关版权法规。 Styly BY EVA CHIAO</p>
+        </footer>
+    </div>
+
+    <!-- 设置弹窗 -->
+    <div id="settings-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h2>API Key 管理</h2>
+            <p>您的API Key将仅存储在您的浏览器本地，不会上传至任何服务器。</p>
+            <div class="api-key-input-group">
+                <input type="password" id="api-key-input" placeholder="在此输入您的 Google Gemini API Key">
+                <button id="add-key-btn">添加</button>
+            </div>
+            <div class="api-key-list">
+                <h3>已保存的 Key：</h3>
+                <ul id="key-list-ul"></ul>
+            </div>
+            <button id="close-modal-btn" class="close-modal-btn">关闭</button>
+        </div>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
