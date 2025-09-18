@@ -307,14 +307,14 @@
             const zlibOfficialUrl = `${ZLIB_OFFICIAL_DOMAIN}/s?q=${searchQuery}`;
             const zlibHtml = createDropdownHTML(`z-library-${index}`, "Z-Library", zlibOfficialUrl, zlibMirrors, `/s?q=${searchQuery}`);
 
-            // 新增三个中文图书网站的按钮
-            const chineseSitesHtml = `
-                <div class="chinese-sites-container">
-                    <button class="scrape-btn" data-target="xiaolipan" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从小立盘获取 ⏬</button>
-                    <button class="scrape-btn" data-target="book5678" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从Book5678获取 ⏬</button>
-                    <button class="scrape-btn" data-target="35ppt" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从35PPT获取 ⏬</button>
-                </div>
-            `;
+// 修改这行代码
+const chineseSitesHtml = `
+    <div class="chinese-sites-container">
+        <button class="scrape-btn" data-target="xiaolipan" data-query="${book.title}" data-isbn="${book.isbn_13 || ''}" data-author="${book.author || ''}">从小立盘获取 ⏬</button>
+        <button class="scrape-btn" data-target="book5678" data-query="${book.title}" data-isbn="${book.isbn_13 || ''}" data-author="${book.author || ''}">从Book5678获取 ⏬</button>
+        <button class="scrape-btn" data-target="35ppt" data-query="${book.title}" data-isbn="${book.isbn_13 || ''}" data-author="${book.author || ''}">从35PPT获取 ⏬</button>
+    </div>
+`;
             
             let availabilityHtml = '';
             if (book.availability) {
@@ -401,6 +401,7 @@ resultsContainer.addEventListener('click', async (event) => {
         const site = target.dataset.target;
         const query = target.dataset.query;
         const isbn = target.dataset.isbn;
+        const author = target.dataset.author; // 新增作者信息
         const linksContainer = target.parentElement.parentElement.querySelector('.direct-links-container');
         
         target.textContent = '正在获取...';
@@ -409,13 +410,24 @@ resultsContainer.addEventListener('click', async (event) => {
         
         try {
             const bookLinks = await fetchAIResponseWithProxy({ 
-                scrapeTask: { target: site, query, isbn } 
+                scrapeTask: { target: site, query, isbn, author } 
             });
             
             if (bookLinks && Array.isArray(bookLinks) && bookLinks.length > 0) {
-                bookLinks.forEach(link => {
+                // 只显示相关性最高的3个结果
+                const topResults = bookLinks.slice(0, 3);
+                
+                topResults.forEach(link => {
                     const div = document.createElement('div');
                     div.className = 'book-link-item';
+                    
+                    // 显示相关性评分（调试用）
+                    const relevanceSpan = document.createElement('span');
+                    relevanceSpan.className = 'relevance-score';
+                    relevanceSpan.textContent = `相关度: ${link.relevance}`;
+                    relevanceSpan.style.fontSize = '0.8em';
+                    relevanceSpan.style.color = '#7f8c8d';
+                    relevanceSpan.style.marginRight = '10px';
                     
                     // 创建详情页链接
                     const detailLink = document.createElement('a');
@@ -424,13 +436,14 @@ resultsContainer.addEventListener('click', async (event) => {
                     detailLink.target = '_blank';
                     detailLink.className = 'book-detail-link';
                     
+                    div.appendChild(relevanceSpan);
                     div.appendChild(detailLink);
                     
                     // 如果有下载页链接，也添加
                     if (link.downloadUrl) {
                         const downloadLink = document.createElement('a');
                         downloadLink.href = link.downloadUrl;
-                        downloadLink.textContent = ' 下载页面';
+                        downloadLink.textContent = '下载页面';
                         downloadLink.target = '_blank';
                         downloadLink.className = 'book-download-link';
                         downloadLink.style.marginLeft = '10px';
