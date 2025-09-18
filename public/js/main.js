@@ -417,13 +417,27 @@ resultsContainer.addEventListener('click', async (event) => {
                     const div = document.createElement('div');
                     div.className = 'book-link-item';
                     
-                    const a = document.createElement('a');
-                    a.href = link.url;
-                    a.textContent = `${link.site}: ${link.title}`;
-                    a.target = '_blank';
-                    a.className = 'book-detail-link';
+                    // 创建详情页链接
+                    const detailLink = document.createElement('a');
+                    detailLink.href = link.detailUrl;
+                    detailLink.textContent = `${link.site}: ${link.title}`;
+                    detailLink.target = '_blank';
+                    detailLink.className = 'book-detail-link';
                     
-                    div.appendChild(a);
+                    div.appendChild(detailLink);
+                    
+                    // 如果有下载页链接，也添加
+                    if (link.downloadUrl) {
+                        const downloadLink = document.createElement('a');
+                        downloadLink.href = link.downloadUrl;
+                        downloadLink.textContent = ' 下载页面';
+                        downloadLink.target = '_blank';
+                        downloadLink.className = 'book-download-link';
+                        downloadLink.style.marginLeft = '10px';
+                        
+                        div.appendChild(downloadLink);
+                    }
+                    
                     linksContainer.appendChild(div);
                 });
             } else {
