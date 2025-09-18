@@ -4,13 +4,12 @@
     // =======================================================
     const PROXY_ENDPOINT = '/proxy';
     const API_TIMEOUT_MS = 60000;
-    // 使用您提供的、经过验证的安全Z-Library官网域名
     const ZLIB_OFFICIAL_DOMAIN = "https://zh.z-lib.gd";
     
-    // 新增：镜像发现功能配置
-    const MIRROR_DISCOVERY_ENABLED = true; // 是否启用智能镜像发现
-    const SAFETY_CHECK_ENABLED = true; // 是否启用安全筛选
-    const MIRROR_CACHE_DURATION = 60 * 60 * 1000; // 镜像缓存时间（1小时）
+    // 镜像发现功能配置
+    const MIRROR_DISCOVERY_ENABLED = true;
+    const SAFETY_CHECK_ENABLED = true;
+    const MIRROR_CACHE_DURATION = 60 * 60 * 1000;
 
     // =======================================================
     // DOM元素获取
@@ -31,7 +30,7 @@
     let currentKeyIndex = 0;
 
     // =======================================================
-    // 主处理函数 (单次API调用)
+    // 主处理函数
     // =======================================================
     async function handleSearch() {
         if (apiKeys.length === 0) { alert("请先设置 API Key。"); return; }
@@ -54,7 +53,7 @@
     }
 
     // =======================================================
-    // 终极的、唯一的AI Prompt构建函数 (安全加固版)
+    // 终极的、唯一的AI Prompt构建函数
     // =======================================================
     function buildUltimatePrompt(userQuery) {
         const instruction = `
@@ -98,14 +97,8 @@
     }
 
     // =======================================================
-    // 新增：智能镜像发现与安全验证模块
+    // 智能镜像发现与安全验证模块
     // =======================================================
-
-    /**
-     * 获取AI推荐的、经过安全筛选的镜像列表
-     * @param {string} target - 'anna_archive' 或 'z_library'
-     * @returns {Promise<Array>} - 安全的镜像URL数组
-     */
     async function fetchAIVerifiedMirrors(target) {
         // 检查缓存
         const cacheKey = `mirrors_${target}`;
@@ -163,9 +156,6 @@
         }
     }
 
-    /**
-     * 构建专门用于发现和验证镜像的Prompt（关键安全加固）
-     */
     function buildMirrorDiscoveryPrompt(targetSite) {
         const siteName = targetSite === 'anna_archive' ? "Anna's Archive" : "Z-Library";
         return `
@@ -189,9 +179,6 @@
 `;
     }
 
-    /**
-     * 快速验证镜像数组（简单示例）
-     */
     async function quicklyVerifyMirrors(mirrorUrls) {
         const verificationPromises = mirrorUrls.map(async (url) => {
             try {
@@ -216,9 +203,6 @@
         return results.filter(url => url !== null);
     }
 
-    /**
-     * 备用镜像列表（当AI无法提供或验证失败时使用）
-     */
     function getFallbackMirrors(target) {
         const fallbackMirrors = {
             anna_archive: [
@@ -234,9 +218,6 @@
         return fallbackMirrors[target] || [];
     }
 
-    /**
-     * 从缓存获取镜像
-     */
     function getCachedMirrors(key) {
         try {
             const cached = localStorage.getItem(key);
@@ -252,9 +233,6 @@
         return null;
     }
 
-    /**
-     * 缓存镜像
-     */
     function cacheMirrors(key, mirrors) {
         try {
             localStorage.setItem(key, JSON.stringify({
@@ -267,7 +245,7 @@
     }
 
     // =======================================================
-    // 结果渲染函数 (整合镜像发现功能)
+    // 结果渲染函数
     // =======================================================
     async function displayResults(report) {
         resultsContainer.innerHTML = '';
@@ -325,11 +303,18 @@
 
             const annaHtml = createDropdownHTML(`anna-archive-${index}`, "Anna's Archive", `https://annas-archive.org/search?q=${searchQuery}`, annaMirrors, `/search?q=${searchQuery}`);
             
-            // Z-Library链接，使用安全的硬编码官网地址 + 动态安全镜像
+            // Z-Library链接
             const zlibOfficialUrl = `${ZLIB_OFFICIAL_DOMAIN}/s?q=${searchQuery}`;
             const zlibHtml = createDropdownHTML(`z-library-${index}`, "Z-Library", zlibOfficialUrl, zlibMirrors, `/s?q=${searchQuery}`);
 
-            const manyBooksHtml = `<button class="scrape-btn" data-target="manybooks" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从 ManyBooks 尝试获取 ⏬</button>`;
+            // 新增三个中文图书网站的按钮
+            const chineseSitesHtml = `
+                <div class="chinese-sites-container">
+                    <button class="scrape-btn" data-target="xiaolipan" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从小立盘获取 ⏬</button>
+                    <button class="scrape-btn" data-target="book5678" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从Book5678获取 ⏬</button>
+                    <button class="scrape-btn" data-target="35ppt" data-query="${book.searchQuery}" data-isbn="${book.isbn_13 || ''}">从35PPT获取 ⏬</button>
+                </div>
+            `;
             
             let availabilityHtml = '';
             if (book.availability) {
@@ -348,7 +333,7 @@
                 <div class="links-container">
                     ${annaHtml}
                     ${zlibHtml}
-                    ${manyBooksHtml}
+                    ${chineseSitesHtml}
                     <div class="direct-links-container" id="direct-links-${index}"></div>
                 </div>
             `;
@@ -357,7 +342,7 @@
     }
 
     // =======================================================
-    // 带有超时和健壮重试机制的API调用函数
+    // API调用函数
     // =======================================================
     async function fetchAIResponseWithProxy({ body, scrapeTask }) {
         if (apiKeys.length === 0 && !scrapeTask) {
@@ -403,7 +388,7 @@
     }
 
     // =======================================================
-    // 事件监听器 (委托爬虫按钮和下拉按钮)
+    // 事件监听器
     // =======================================================
     resultsContainer.addEventListener('click', async (event) => {
         const target = event.target;
@@ -413,19 +398,25 @@
             if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
         }
         if (target.classList.contains('scrape-btn')) {
+            const site = target.dataset.target;
             const query = target.dataset.query;
             const isbn = target.dataset.isbn;
-            const linksContainer = target.parentElement.querySelector('.direct-links-container');
+            const linksContainer = target.parentElement.parentElement.querySelector('.direct-links-container');
+            
             target.textContent = '正在获取...';
             target.disabled = true;
             linksContainer.innerHTML = '';
+            
             try {
-                const directLinks = await fetchAIResponseWithProxy({ scrapeTask: { target: 'manybooks', query, isbn } });
+                const directLinks = await fetchAIResponseWithProxy({ 
+                    scrapeTask: { target: site, query, isbn } 
+                });
+                
                 if (directLinks && Array.isArray(directLinks) && directLinks.length > 0) {
                     directLinks.forEach(link => {
                         const a = document.createElement('a');
                         a.href = link.url;
-                        a.textContent = `下载 ${link.format}`;
+                        a.textContent = `${link.format} 下载`;
                         a.target = '_blank';
                         a.className = 'direct-download-link';
                         linksContainer.appendChild(a);
@@ -434,7 +425,7 @@
                     linksContainer.innerHTML = `<span class="scrape-not-found">未找到直接下载资源。</span>`;
                 }
             } catch (error) {
-                console.error("Scraper failed:", error);
+                console.error(`${site} scraper failed:`, error);
                 linksContainer.innerHTML = `<span class="scrape-not-found">获取失败: ${error.message}</span>`;
             } finally {
                 target.style.display = 'none';
@@ -443,7 +434,7 @@
     });
 
     // =======================================================
-    // 其他所有辅助函数
+    // 辅助函数
     // =======================================================
     function createDropdownHTML(id, label, officialUrl, mirrors, searchPath) {
         const links = [
