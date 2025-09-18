@@ -1,4 +1,4 @@
-// /functions/proxy.js - 直接爬取 ManyBooks 官方页面的解决方案
+// /functions/proxy.js - 移除ManyBooks，新增三个中文图书网站支持
 
 // =======================================================
 // 主路由函数
@@ -14,9 +14,9 @@ export async function onRequest(context) {
         const requestData = await request.json();
         const { apiKey, body, scrapeTask } = requestData;
 
-        // 处理 ManyBooks 爬取任务
-        if (scrapeTask && scrapeTask.target === 'manybooks') {
-            return handleManyBooksScraper(scrapeTask.query, scrapeTask.isbn);
+        // 处理图书网站爬取任务
+        if (scrapeTask && scrapeTask.target) {
+            return handleBookSiteScraper(scrapeTask.target, scrapeTask.query, scrapeTask.isbn);
         }
 
         // 处理 Gemini API 请求
@@ -51,29 +51,29 @@ async function handleGeminiApiProxy(apiKey, body) {
 }
 
 // =======================================================
-// 直接处理ManyBooks官方页面爬取的函数
+// 处理图书网站爬取的函数
 // =======================================================
-async function handleManyBooksScraper(query, isbn) {
+async function handleBookSiteScraper(target, query, isbn) {
     try {
-        console.log(`开始ManyBooks搜索: ${query}, ISBN: ${isbn}`);
+        console.log(`开始爬取 ${target}: ${query}, ISBN: ${isbn}`);
         
-        // 第一步: 搜索书籍获取详情页URL
-        const bookDetailUrl = await searchManyBooks(query, isbn);
+        let downloadLinks = [];
         
-        if (!bookDetailUrl) {
-            console.log("未找到匹配的书籍");
-            return new Response(JSON.stringify([]), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-            });
+        switch (target) {
+            case 'xiaolipan':
+                downloadLinks = await scrapeXiaolipan(query, isbn);
+                break;
+            case 'book5678':
+                downloadLinks = await scrapeBook5678(query, isbn);
+                break;
+            case '35ppt':
+                downloadLinks = await scrape35PPT(query, isbn);
+                break;
+            default:
+                throw new Error(`未知的目标网站: ${target}`);
         }
         
-        console.log(`找到书籍详情页: ${bookDetailUrl}`);
-        
-        // 第二步: 访问详情页并获取下载链接
-        const downloadLinks = await getDownloadLinksFromDetailPage(bookDetailUrl);
-        
-        console.log(`获取到 ${downloadLinks.length} 个下载链接`);
+        console.log(`从 ${target} 获取到 ${downloadLinks.length} 个下载链接`);
         
         return new Response(JSON.stringify(downloadLinks), {
             status: 200,
@@ -81,9 +81,9 @@ async function handleManyBooksScraper(query, isbn) {
         });
 
     } catch (error) {
-        console.error('ManyBooks Scraper Error:', error);
+        console.error(`${target} Scraper Error:`, error);
         return new Response(JSON.stringify({ 
-            error: 'Failed to scrape ManyBooks', 
+            error: `Failed to scrape ${target}`, 
             details: error.message 
         }), { 
             status: 500, 
@@ -93,324 +93,314 @@ async function handleManyBooksScraper(query, isbn) {
 }
 
 // =======================================================
-// 搜索ManyBooks获取书籍详情页URL
+// 小立盘 (xiaolipan.com) 爬取函数
 // =======================================================
-async function searchManyBooks(query, isbn) {
-    // 构建搜索URL - 优先使用ISBN搜索（如果提供）
-    let searchUrl;
-    if (isbn && isbn !== 'null' && isbn !== 'undefined') {
-        searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(isbn)}`;
-    } else {
-        // 对于中文书籍，添加"中文"关键词提高匹配度
-        const enhancedQuery = hasChineseCharacters(query) ? `${query} 中文` : query;
-        searchUrl = `https://manybooks.net/search-book?search=${encodeURIComponent(enhancedQuery)}`;
-    }
-    
-    console.log(`搜索URL: ${searchUrl}`);
-    
-    const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Referer': 'https://manybooks.net/',
-    };
+async function scrapeXiaolipan(query, isbn) {
+    const downloadLinks = [];
     
     try {
+        // 构建搜索URL
+        const searchUrl = `https://www.xiaolipan.com/search?keyword=${encodeURIComponent(query)}`;
+        console.log(`小立盘搜索URL: ${searchUrl}`);
+        
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Referer': 'https://www.xiaolipan.com/',
+        };
+        
+        // 执行搜索
         const response = await fetch(searchUrl, { headers });
         
         if (!response.ok) {
-            throw new Error(`搜索请求失败: ${response.status}`);
+            throw new Error(`小立盘搜索请求失败: ${response.status}`);
         }
         
         const html = await response.text();
         
-        // 解析搜索结果，获取第一个匹配的书籍详情页URL
-        return parseSearchResults(html, query);
+        // 解析搜索结果，获取书籍详情页URL
+        const bookDetailUrl = parseXiaolipanSearchResults(html, query);
+        
+        if (!bookDetailUrl) {
+            console.log("小立盘未找到匹配的书籍");
+            return downloadLinks;
+        }
+        
+        console.log(`小立盘找到书籍详情页: ${bookDetailUrl}`);
+        
+        // 访问详情页获取下载链接
+        const detailResponse = await fetch(bookDetailUrl, { headers });
+        
+        if (!detailResponse.ok) {
+            throw new Error(`小立盘详情页请求失败: ${detailResponse.status}`);
+        }
+        
+        const detailHtml = await detailResponse.text();
+        
+        // 解析下载链接
+        return parseXiaolipanDownloadLinks(detailHtml);
         
     } catch (error) {
-        console.error("搜索失败:", error);
-        return null;
+        console.error("小立盘爬取失败:", error);
+        return downloadLinks;
     }
 }
 
-// =======================================================
-// 解析搜索结果获取书籍详情页URL
-// =======================================================
-function parseSearchResults(html, query) {
-    // 方法1: 使用正则表达式查找详情页链接
-    // ManyBooks的搜索结果页通常使用这种格式的链接
+// 解析小立盘搜索结果
+function parseXiaolipanSearchResults(html, query) {
+    // 使用正则表达式查找详情页链接
+    // 小立盘的搜索结果页通常包含类似这样的链接: <a href="/book/12345">书名</a>
     const regexPatterns = [
-        /<a[^>]*href="(\/titles\/[^"]*)"[^>]*class="[^"]*book-title[^"]*"[^>]*>/i,
-        /<a[^>]*href="(\/titles\/[^"]*)"[^>]*title="[^"]*"[^>]*>/i,
-        /<h2[^>]*>\s*<a[^>]*href="(\/titles\/[^"]*)"[^>]*>/i,
-        /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*book-title[^"]*"[^>]*>/i
+        /<a[^>]*href="(\/book\/[^"]*)"[^>]*title="[^"]*"[^>]*>/i,
+        /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>/i,
+        /<h3[^>]*>\s*<a[^>]*href="(\/book\/[^"]*)"[^>]*>/i
     ];
     
     for (const pattern of regexPatterns) {
         const match = html.match(pattern);
         if (match && match[1]) {
-            const url = match[1].startsWith('http') ? match[1] : `https://manybooks.net${match[1]}`;
-            console.log(`使用正则找到详情页: ${url}`);
-            return url;
+            return `https://www.xiaolipan.com${match[1]}`;
         }
     }
     
-    // 方法2: 使用HTMLRewriter作为备选
-    let foundUrl = null;
-    const rewriter = new HTMLRewriter();
-    rewriter.on('a[href*="/titles/"], a[href*="/book/"]', {
-        element(element) {
-            if (!foundUrl) {
-                const href = element.getAttribute('href');
-                const text = element.text;
-                
-                // 检查链接文本是否与查询相关
-                if (href && text && isRelevantResult(text, query)) {
-                    foundUrl = href.startsWith('http') ? href : `https://manybooks.net${href}`;
-                    console.log(`使用HTMLRewriter找到详情页: ${foundUrl}`);
-                }
-            }
-        }
-    });
-    
-    // 消耗响应体来触发解析
-    rewriter.transform(new Response(html)).text();
-    
-    return foundUrl;
+    return null;
 }
 
-// =======================================================
-// 从详情页获取下载链接
-// =======================================================
-async function getDownloadLinksFromDetailPage(detailUrl) {
-    const headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Referer': 'https://manybooks.net/',
-    };
-    
-    try {
-        // 访问详情页
-        const response = await fetch(detailUrl, { headers });
-        
-        if (!response.ok) {
-            throw new Error(`详情页请求失败: ${response.status}`);
-        }
-        
-        const html = await response.text();
-        
-        // 解析下载链接
-        const downloadLinks = parseDownloadLinksFromDetailPage(html);
-        
-        // 如果没找到下载链接，尝试处理可能的验证
-        if (downloadLinks.length === 0 && requiresVerification(html)) {
-            console.log("检测到需要验证，尝试处理验证流程");
-            const verifiedHtml = await handleVerification(detailUrl, html, headers);
-            return parseDownloadLinksFromDetailPage(verifiedHtml);
-        }
-        
-        return downloadLinks;
-        
-    } catch (error) {
-        console.error("获取下载链接失败:", error);
-        return [];
-    }
-}
-
-// =======================================================
-// 从详情页HTML解析下载链接
-// =======================================================
-function parseDownloadLinksFromDetailPage(html) {
+// 解析小立盘下载链接
+function parseXiaolipanDownloadLinks(html) {
     const downloadLinks = [];
     
-    // ManyBooks详情页的下载链接通常在这些位置:
-    // 1. 侧边栏的下载区域
-    // 2. 页面底部的下载区域
-    // 3. 专门的下载页面链接
+    // 使用正则表达式查找下载链接
+    // 小立盘的下载链接通常包含"下载"或"download"字样
+    const downloadRegex = /<a[^>]*href="([^"]*)"[^>]*>(下载|Download)[^<]*<\/a>/gi;
+    let downloadMatch;
     
-    // 方法1: 查找侧边栏下载链接
-    const sidebarRegex = /<div[^>]*class="[^"]*sidebar-downloads[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
-    const sidebarMatch = html.match(sidebarRegex);
-    
-    if (sidebarMatch) {
-        const sidebarHtml = sidebarMatch[1];
-        const links = extractDownloadLinksFromHtml(sidebarHtml);
-        downloadLinks.push(...links);
-    }
-    
-    // 方法2: 查找底部下载链接
-    const footerRegex = /<div[^>]*class="[^"]*downloads[^"]*"[^>]*>([\s\S]*?)<\/div>/i;
-    const footerMatch = html.match(footerRegex);
-    
-    if (footerMatch) {
-        const footerHtml = footerMatch[1];
-        const links = extractDownloadLinksFromHtml(footerHtml);
-        downloadLinks.push(...links);
-    }
-    
-    // 方法3: 查找所有可能的下载链接
-    if (downloadLinks.length === 0) {
-        const links = extractDownloadLinksFromHtml(html);
-        downloadLinks.push(...links);
-    }
-    
-    // 去重
-    return Array.from(new Set(downloadLinks.map(link => JSON.stringify(link))))
-        .map(str => JSON.parse(str));
-}
-
-// =======================================================
-// 从HTML片段提取下载链接
-// =======================================================
-function extractDownloadLinksFromHtml(html) {
-    const downloadLinks = [];
-    
-    // 查找所有下载链接
-    const linkRegex = /<a[^>]*href="(\/download[^"]*)"[^>]*>([^<]*)<\/a>/gi;
-    let linkMatch;
-    
-    while ((linkMatch = linkRegex.exec(html)) !== null) {
-        const format = linkMatch[2].trim();
-        const url = linkMatch[1];
-        
-        if (format && url && !url.includes('#')) {
+    while ((downloadMatch = downloadRegex.exec(html)) !== null) {
+        const url = downloadMatch[1];
+        if (url && !url.startsWith('javascript:')) {
             downloadLinks.push({
-                format: format.toUpperCase(),
-                url: `https://manybooks.net${url}`
+                format: getFormatFromUrl(url),
+                url: url.startsWith('http') ? url : `https://www.xiaolipan.com${url}`
             });
-            console.log(`找到下载链接: ${format} - ${url}`);
         }
-    }
-    
-    // 使用HTMLRewriter作为备选
-    if (downloadLinks.length === 0) {
-        const rewriter = new HTMLRewriter();
-        rewriter.on('a[href*="/download"]', {
-            element(element) {
-                const href = element.getAttribute('href');
-                const text = element.text;
-                if (href && text) {
-                    downloadLinks.push({
-                        format: text.trim().toUpperCase(),
-                        url: `https://manybooks.net${href}`
-                    });
-                }
-            }
-        });
-        
-        rewriter.transform(new Response(html)).text();
     }
     
     return downloadLinks;
 }
 
 // =======================================================
-// 检查页面是否需要验证
+// Book5678 (book5678.com) 爬取函数
 // =======================================================
-function requiresVerification(html) {
-    // 检查是否存在常见的验证表单元素
-    const verificationIndicators = [
-        /age-verification/i,
-        /download-verification/i,
-        /confirm.*age/i,
-        /verify.*download/i,
-        /form.*action.*verify/i,
-        /form.*action.*confirm/i
-    ];
-    
-    return verificationIndicators.some(pattern => pattern.test(html));
-}
-
-// =======================================================
-// 处理验证流程
-// =======================================================
-async function handleVerification(detailUrl, html, headers) {
-    // 提取验证表单数据
-    const formData = extractVerificationFormData(html);
-    
-    if (!formData) {
-        console.log("无法提取验证表单数据");
-        return html;
-    }
+async function scrapeBook5678(query, isbn) {
+    const downloadLinks = [];
     
     try {
-        // 提交验证表单
-        const formResponse = await fetch(formData.action, {
-            method: formData.method,
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                ...headers
-            },
-            body: formData.body
-        });
+        // 构建搜索URL
+        const searchUrl = `https://book5678.com/search?q=${encodeURIComponent(query)}`;
+        console.log(`Book5678搜索URL: ${searchUrl}`);
         
-        if (!formResponse.ok) {
-            throw new Error(`验证表单提交失败: ${formResponse.status}`);
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Referer': 'https://book5678.com/',
+        };
+        
+        // 执行搜索
+        const response = await fetch(searchUrl, { headers });
+        
+        if (!response.ok) {
+            throw new Error(`Book5678搜索请求失败: ${response.status}`);
         }
         
-        return await formResponse.text();
+        const html = await response.text();
+        
+        // 解析搜索结果，获取书籍详情页URL
+        const bookDetailUrl = parseBook5678SearchResults(html, query);
+        
+        if (!bookDetailUrl) {
+            console.log("Book5678未找到匹配的书籍");
+            return downloadLinks;
+        }
+        
+        console.log(`Book5678找到书籍详情页: ${bookDetailUrl}`);
+        
+        // 访问详情页获取下载链接
+        const detailResponse = await fetch(bookDetailUrl, { headers });
+        
+        if (!detailResponse.ok) {
+            throw new Error(`Book5678详情页请求失败: ${detailResponse.status}`);
+        }
+        
+        const detailHtml = await detailResponse.text();
+        
+        // 解析下载链接
+        return parseBook5678DownloadLinks(detailHtml);
         
     } catch (error) {
-        console.error("验证流程处理失败:", error);
-        return html;
+        console.error("Book5678爬取失败:", error);
+        return downloadLinks;
     }
 }
 
-// =======================================================
-// 提取验证表单数据
-// =======================================================
-function extractVerificationFormData(html) {
-    // 查找表单
-    const formRegex = /<form[^>]*action="([^"]*)"[^>]*method="([^"]*)"[^>]*>([\s\S]*?)<\/form>/i;
-    const formMatch = html.match(formRegex);
+// 解析Book5678搜索结果
+function parseBook5678SearchResults(html, query) {
+    // 使用正则表达式查找详情页链接
+    const regexPatterns = [
+        /<a[^>]*href="(\/book\/[^"]*)"[^>]*title="[^"]*"[^>]*>/i,
+        /<a[^>]*href="(\/detail\/[^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>/i,
+        /<h3[^>]*>\s*<a[^>]*href="(\/book\/[^"]*)"[^>]*>/i
+    ];
     
-    if (!formMatch) {
-        return null;
+    for (const pattern of regexPatterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+            return `https://book5678.com${match[1]}`;
+        }
     }
     
-    const action = formMatch[1];
-    const method = formMatch[2] || 'POST';
-    const formContent = formMatch[3];
+    return null;
+}
+
+// 解析Book5678下载链接
+function parseBook5678DownloadLinks(html) {
+    const downloadLinks = [];
     
-    // 提取所有字段
-    const fieldRegex = /<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"[^>]*>/gi;
-    const fields = new URLSearchParams();
-    let fieldMatch;
+    // 使用正则表达式查找下载链接
+    const downloadRegex = /<a[^>]*href="([^"]*)"[^>]*>(下载|百度网盘|蓝奏云|天翼云)[^<]*<\/a>/gi;
+    let downloadMatch;
     
-    while ((fieldMatch = fieldRegex.exec(formContent)) !== null) {
-        fields.append(fieldMatch[1], fieldMatch[2]);
+    while ((downloadMatch = downloadRegex.exec(html)) !== null) {
+        const url = downloadMatch[1];
+        if (url && !url.startsWith('javascript:')) {
+            downloadLinks.push({
+                format: getFormatFromUrl(url),
+                url: url.startsWith('http') ? url : `https://book5678.com${url}`
+            });
+        }
     }
     
-    return {
-        action: action.startsWith('http') ? action : new URL(action, 'https://manybooks.net').href,
-        method: method,
-        body: fields.toString()
-    };
+    return downloadLinks;
+}
+
+// =======================================================
+// 35PPT (35ppt.com) 爬取函数
+// =======================================================
+async function scrape35PPT(query, isbn) {
+    const downloadLinks = [];
+    
+    try {
+        // 构建搜索URL
+        const searchUrl = `https://www.35ppt.com/search/${encodeURIComponent(query)}`;
+        console.log(`35PPT搜索URL: ${searchUrl}`);
+        
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Referer': 'https://www.35ppt.com/',
+        };
+        
+        // 执行搜索
+        const response = await fetch(searchUrl, { headers });
+        
+        if (!response.ok) {
+            throw new Error(`35PPT搜索请求失败: ${response.status}`);
+        }
+        
+        const html = await response.text();
+        
+        // 解析搜索结果，获取书籍详情页URL
+        const bookDetailUrl = parse35PPTSearchResults(html, query);
+        
+        if (!bookDetailUrl) {
+            console.log("35PPT未找到匹配的书籍");
+            return downloadLinks;
+        }
+        
+        console.log(`35PPT找到书籍详情页: ${bookDetailUrl}`);
+        
+        // 访问详情页获取下载链接
+        const detailResponse = await fetch(bookDetailUrl, { headers });
+        
+        if (!detailResponse.ok) {
+            throw new Error(`35PPT详情页请求失败: ${detailResponse.status}`);
+        }
+        
+        const detailHtml = await detailResponse.text();
+        
+        // 解析下载链接
+        return parse35PPTDownloadLinks(detailHtml);
+        
+    } catch (error) {
+        console.error("35PPT爬取失败:", error);
+        return downloadLinks;
+    }
+}
+
+// 解析35PPT搜索结果
+function parse35PPTSearchResults(html, query) {
+    // 使用正则表达式查找详情页链接
+    const regexPatterns = [
+        /<a[^>]*href="(\/ppt\/[^"]*)"[^>]*title="[^"]*"[^>]*>/i,
+        /<a[^>]*href="(\/book\/[^"]*)"[^>]*class="[^"]*title[^"]*"[^>]*>/i,
+        /<h3[^>]*>\s*<a[^>]*href="(\/down\/[^"]*)"[^>]*>/i
+    ];
+    
+    for (const pattern of regexPatterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+            return `https://www.35ppt.com${match[1]}`;
+        }
+    }
+    
+    return null;
+}
+
+// 解析35PPT下载链接
+function parse35PPTDownloadLinks(html) {
+    const downloadLinks = [];
+    
+    // 使用正则表达式查找下载链接
+    const downloadRegex = /<a[^>]*href="([^"]*)"[^>]*>(下载|百度网盘|蓝奏云|天翼云|城通网盘)[^<]*<\/a>/gi;
+    let downloadMatch;
+    
+    while ((downloadMatch = downloadRegex.exec(html)) !== null) {
+        const url = downloadMatch[1];
+        if (url && !url.startsWith('javascript:')) {
+            downloadLinks.push({
+                format: getFormatFromUrl(url),
+                url: url.startsWith('http') ? url : `https://www.35ppt.com${url}`
+            });
+        }
+    }
+    
+    return downloadLinks;
 }
 
 // =======================================================
 // 辅助函数
 // =======================================================
 
+// 从URL中提取文件格式
+function getFormatFromUrl(url) {
+    if (url.includes('baidu')) return '百度网盘';
+    if (url.includes('lanzou')) return '蓝奏云';
+    if (url.includes('ctfile')) return '城通网盘';
+    if (url.includes('189')) return '天翼云';
+    
+    // 从文件扩展名判断格式
+    if (url.includes('.pdf')) return 'PDF';
+    if (url.includes('.epub')) return 'EPUB';
+    if (url.includes('.mobi')) return 'MOBI';
+    if (url.includes('.azw3')) return 'AZW3';
+    if (url.includes('.txt')) return 'TXT';
+    
+    return '下载';
+}
+
 // 检查字符串是否包含中文字符
 function hasChineseCharacters(str) {
     return /[\u4e00-\u9fff]/.test(str);
-}
-
-// 检查搜索结果是否与查询相关
-function isRelevantResult(resultText, query) {
-    // 简单实现：检查是否有共同词汇
-    const queryWords = query.toLowerCase().split(/\s+/);
-    const resultWords = resultText.toLowerCase().split(/\s+/);
-    
-    return queryWords.some(word => 
-        word.length > 2 && resultWords.some(rWord => rWord.includes(word))
-    );
 }
