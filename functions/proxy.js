@@ -1,4 +1,4 @@
-// /functions/proxy.js - 修正中文图书网站爬虫逻辑
+// /functions/proxy.js - 智能中文图书搜索系统
 
 // =======================================================
 // 主路由函数
@@ -16,7 +16,7 @@ export async function onRequest(context) {
 
         // 处理图书网站爬取任务
         if (scrapeTask && scrapeTask.target) {
-            return handleBookSiteScraper(scrapeTask.target, scrapeTask.query, scrapeTask.isbn);
+            return handleBookSiteScraper(scrapeTask.target, scrapeTask.query, scrapeTask.isbn, scrapeTask.author);
         }
 
         // 处理 Gemini API 请求
@@ -53,21 +53,21 @@ async function handleGeminiApiProxy(apiKey, body) {
 // =======================================================
 // 处理图书网站爬取的函数
 // =======================================================
-async function handleBookSiteScraper(target, query, isbn) {
+async function handleBookSiteScraper(target, query, isbn, author) {
     try {
-        console.log(`开始爬取 ${target}: ${query}, ISBN: ${isbn}`);
+        console.log(`开始爬取 ${target}: ${query}, ISBN: ${isbn}, 作者: ${author}`);
         
         let bookLinks = [];
         
         switch (target) {
             case 'xiaolipan':
-                bookLinks = await scrapeXiaolipan(query, isbn);
+                bookLinks = await scrapeXiaolipan(query, isbn, author);
                 break;
             case 'book5678':
-                bookLinks = await scrapeBook5678(query, isbn);
+                bookLinks = await scrapeBook5678(query, isbn, author);
                 break;
             case '35ppt':
-                bookLinks = await scrape35PPT(query, isbn);
+                bookLinks = await scrape35PPT(query, isbn, author);
                 break;
             default:
                 throw new Error(`未知的目标网站: ${target}`);
@@ -95,12 +95,17 @@ async function handleBookSiteScraper(target, query, isbn) {
 // =======================================================
 // 小立盘 (xiaolipan.com) 爬取函数
 // =======================================================
-async function scrapeXiaolipan(query, isbn) {
+async function scrapeXiaolipan(query, isbn, author) {
     const bookLinks = [];
     
     try {
-        // 构建搜索URL - 使用您提供的格式
-        const searchUrl = `https://www.xiaolipan.com/search.html?keyword=${encodeURIComponent(query)}`;
+        // 构建更精确的搜索URL - 结合书名和作者
+        let searchQuery = query;
+        if (author && !query.includes(author)) {
+            searchQuery = `${query} ${author}`;
+        }
+        
+        const searchUrl = `https://www.xiaolipan.com/search.html?keyword=${encodeURIComponent(searchQuery)}`;
         console.log(`小立盘搜索URL: ${searchUrl}`);
         
         const headers = {
@@ -119,28 +124,29 @@ async function scrapeXiaolipan(query, isbn) {
         
         const html = await response.text();
         
-        // 解析搜索结果，获取书籍详情页URL
-        const bookDetailUrls = parseXiaolipanSearchResults(html, query);
+        // 解析搜索结果，获取书籍详情页URL和标题
+        const bookDetails = parseXiaolipanSearchResults(html, query, author);
         
-        if (bookDetailUrls.length === 0) {
+        if (bookDetails.length === 0) {
             console.log("小立盘未找到匹配的书籍");
             return bookLinks;
         }
         
-        console.log(`小立盘找到 ${bookDetailUrls.length} 个匹配的书籍`);
+        console.log(`小立盘找到 ${bookDetails.length} 个匹配的书籍`);
         
         // 返回书籍详情页链接和对应的下载页链接
-        return bookDetailUrls.map(detailUrl => {
+        return bookDetails.map(({detailUrl, title}) => {
             // 根据您提供的信息，将/p/替换为/download/得到下载页
             const downloadUrl = detailUrl.replace('/p/', '/download/');
             return {
                 site: '小立盘',
-                title: extractTitleFromUrl(detailUrl),
+                title: title,
                 detailUrl: detailUrl,
                 downloadUrl: downloadUrl,
-                format: '详情页'
+                format: '详情页',
+                relevance: calculateRelevance(title, query, author)
             };
-        });
+        }).sort((a, b) => b.relevance - a.relevance); // 按相关性排序
         
     } catch (error) {
         console.error("小立盘爬取失败:", error);
@@ -149,41 +155,48 @@ async function scrapeXiaolipan(query, isbn) {
 }
 
 // 解析小立盘搜索结果
-function parseXiaolipanSearchResults(html, query) {
-    const bookUrls = [];
+function parseXiaolipanSearchResults(html, query, author) {
+    const bookDetails = [];
     
-    // 使用正则表达式查找详情页链接
+    // 使用更精确的正则表达式查找详情页链接和标题
     // 小立盘的详情页链接格式: /p/数字.html
     const regexPatterns = [
-        /<a[^>]*href="(\/p\/\d+\.html)"[^>]*title="[^"]*"[^>]*>/gi,
-        /<a[^>]*href="(\/p\/\d+\.html)"[^>]*class="[^"]*title[^"]*"[^>]*>/gi,
-        /<h3[^>]*>\s*<a[^>]*href="(\/p\/\d+\.html)"[^>]*>/gi
+        /<a[^>]*href="(\/p\/\d+\.html)"[^>]*title="([^"]*)"[^>]*>/gi,
+        /<h3[^>]*>\s*<a[^>]*href="(\/p\/\d+\.html)"[^>]*>([^<]*)<\/a>\s*<\/h3>/gi
     ];
     
     for (const pattern of regexPatterns) {
         const matches = html.matchAll(pattern);
         for (const match of matches) {
-            if (match && match[1]) {
-                const url = `https://www.xiaolipan.com${match[1]}`;
-                if (!bookUrls.includes(url)) {
-                    bookUrls.push(url);
+            if (match && match[1] && match[2]) {
+                const detailUrl = `https://www.xiaolipan.com${match[1]}`;
+                const title = match[2].trim();
+                
+                // 检查是否已存在相同的URL
+                if (!bookDetails.some(item => item.detailUrl === detailUrl)) {
+                    bookDetails.push({detailUrl, title});
                 }
             }
         }
     }
     
-    return bookUrls.slice(0, 3); // 返回最多3个结果
+    return bookDetails;
 }
 
 // =======================================================
 // Book5678 (book5678.com) 爬取函数
 // =======================================================
-async function scrapeBook5678(query, isbn) {
+async function scrapeBook5678(query, isbn, author) {
     const bookLinks = [];
     
     try {
-        // 构建搜索URL - 使用您提供的格式
-        const searchUrl = `https://book5678.com/search.php?q=${encodeURIComponent(query)}`;
+        // 构建更精确的搜索URL - 结合书名和作者
+        let searchQuery = query;
+        if (author && !query.includes(author)) {
+            searchQuery = `${query} ${author}`;
+        }
+        
+        const searchUrl = `https://book5678.com/search.php?q=${encodeURIComponent(searchQuery)}`;
         console.log(`Book5678搜索URL: ${searchUrl}`);
         
         const headers = {
@@ -202,23 +215,24 @@ async function scrapeBook5678(query, isbn) {
         
         const html = await response.text();
         
-        // 解析搜索结果，获取书籍详情页URL
-        const bookDetailUrls = parseBook5678SearchResults(html, query);
+        // 解析搜索结果，获取书籍详情页URL和标题
+        const bookDetails = parseBook5678SearchResults(html, query, author);
         
-        if (bookDetailUrls.length === 0) {
+        if (bookDetails.length === 0) {
             console.log("Book5678未找到匹配的书籍");
             return bookLinks;
         }
         
-        console.log(`Book5678找到 ${bookDetailUrls.length} 个匹配的书籍`);
+        console.log(`Book5678找到 ${bookDetails.length} 个匹配的书籍`);
         
         // 返回书籍详情页链接
-        return bookDetailUrls.map(detailUrl => ({
+        return bookDetails.map(({detailUrl, title}) => ({
             site: 'Book5678',
-            title: extractTitleFromUrl(detailUrl),
+            title: title,
             detailUrl: detailUrl,
-            format: '详情页'
-        }));
+            format: '详情页',
+            relevance: calculateRelevance(title, query, author)
+        })).sort((a, b) => b.relevance - a.relevance); // 按相关性排序
         
     } catch (error) {
         console.error("Book5678爬取失败:", error);
@@ -227,41 +241,48 @@ async function scrapeBook5678(query, isbn) {
 }
 
 // 解析Book5678搜索结果
-function parseBook5678SearchResults(html, query) {
-    const bookUrls = [];
+function parseBook5678SearchResults(html, query, author) {
+    const bookDetails = [];
     
-    // 使用正则表达式查找详情页链接
+    // 使用正则表达式查找详情页链接和标题
     // Book5678的详情页链接格式: /post/数字.html
     const regexPatterns = [
-        /<a[^>]*href="(\/post\/\d+\.html)"[^>]*title="[^"]*"[^>]*>/gi,
-        /<a[^>]*href="(\/post\/\d+\.html)"[^>]*class="[^"]*title[^"]*"[^>]*>/gi,
-        /<h3[^>]*>\s*<a[^>]*href="(\/post\/\d+\.html)"[^>]*>/gi
+        /<a[^>]*href="(\/post\/\d+\.html)"[^>]*title="([^"]*)"[^>]*>/gi,
+        /<h3[^>]*>\s*<a[^>]*href="(\/post\/\d+\.html)"[^>]*>([^<]*)<\/a>\s*<\/h3>/gi
     ];
     
     for (const pattern of regexPatterns) {
         const matches = html.matchAll(pattern);
         for (const match of matches) {
-            if (match && match[1]) {
-                const url = `https://book5678.com${match[1]}`;
-                if (!bookUrls.includes(url)) {
-                    bookUrls.push(url);
+            if (match && match[1] && match[2]) {
+                const detailUrl = `https://book5678.com${match[1]}`;
+                const title = match[2].trim();
+                
+                // 检查是否已存在相同的URL
+                if (!bookDetails.some(item => item.detailUrl === detailUrl)) {
+                    bookDetails.push({detailUrl, title});
                 }
             }
         }
     }
     
-    return bookUrls.slice(0, 3); // 返回最多3个结果
+    return bookDetails;
 }
 
 // =======================================================
 // 35PPT (35ppt.com) 爬取函数
 // =======================================================
-async function scrape35PPT(query, isbn) {
+async function scrape35PPT(query, isbn, author) {
     const bookLinks = [];
     
     try {
-        // 构建搜索URL - 使用您提供的格式
-        const searchUrl = `https://www.35ppt.com/?s=${encodeURIComponent(query)}`;
+        // 构建更精确的搜索URL - 结合书名和作者
+        let searchQuery = query;
+        if (author && !query.includes(author)) {
+            searchQuery = `${query} ${author}`;
+        }
+        
+        const searchUrl = `https://www.35ppt.com/?s=${encodeURIComponent(searchQuery)}`;
         console.log(`35PPT搜索URL: ${searchUrl}`);
         
         const headers = {
@@ -281,7 +302,7 @@ async function scrape35PPT(query, isbn) {
         const html = await response.text();
         
         // 解析搜索结果，获取书籍详情页URL和ID
-        const bookDetails = parse35PPTSearchResults(html, query);
+        const bookDetails = parse35PPTSearchResults(html, query, author);
         
         if (bookDetails.length === 0) {
             console.log("35PPT未找到匹配的书籍");
@@ -291,17 +312,18 @@ async function scrape35PPT(query, isbn) {
         console.log(`35PPT找到 ${bookDetails.length} 个匹配的书籍`);
         
         // 返回书籍详情页链接和下载页链接
-        return bookDetails.map(({detailUrl, id}) => {
+        return bookDetails.map(({detailUrl, id, title}) => {
             // 根据您提供的信息，构建下载页URL
             const downloadUrl = `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`;
             return {
                 site: '35PPT',
-                title: extractTitleFromUrl(detailUrl),
+                title: title,
                 detailUrl: detailUrl,
                 downloadUrl: downloadUrl,
-                format: '详情页'
+                format: '详情页',
+                relevance: calculateRelevance(title, query, author)
             };
-        });
+        }).sort((a, b) => b.relevance - a.relevance); // 按相关性排序
         
     } catch (error) {
         console.error("35PPT爬取失败:", error);
@@ -310,32 +332,90 @@ async function scrape35PPT(query, isbn) {
 }
 
 // 解析35PPT搜索结果
-function parse35PPTSearchResults(html, query) {
+function parse35PPTSearchResults(html, query, author) {
     const bookDetails = [];
     
     // 使用正则表达式查找详情页链接和ID
     // 35PPT的详情页链接格式: /数字.html
     const regexPatterns = [
-        /<a[^>]*href="(\/(\d+)\.html)"[^>]*title="[^"]*"[^>]*>/gi,
-        /<h2[^>]*>\s*<a[^>]*href="(\/(\d+)\.html)"[^>]*>/gi
+        /<a[^>]*href="(\/(\d+)\.html)"[^>]*title="([^"]*)"[^>]*>/gi,
+        /<h2[^>]*>\s*<a[^>]*href="(\/(\d+)\.html)"[^>]*>([^<]*)<\/a>\s*<\/h2>/gi
     ];
     
     for (const pattern of regexPatterns) {
         const matches = html.matchAll(pattern);
         for (const match of matches) {
-            if (match && match[1] && match[2]) {
+            if (match && match[1] && match[2] && match[3]) {
                 const detailUrl = `https://www.35ppt.com${match[1]}`;
                 const id = match[2];
+                const title = match[3].trim();
                 
                 // 检查是否已存在相同的URL
                 if (!bookDetails.some(item => item.detailUrl === detailUrl)) {
-                    bookDetails.push({detailUrl, id});
+                    bookDetails.push({detailUrl, id, title});
                 }
             }
         }
     }
     
-    return bookDetails.slice(0, 3); // 返回最多3个结果
+    return bookDetails;
+}
+
+// =======================================================
+// 智能相关性计算函数
+// =======================================================
+
+// 计算搜索结果的相关性分数
+function calculateRelevance(title, query, author) {
+    let score = 0;
+    
+    // 转换为小写以便比较
+    const lowerTitle = title.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const lowerAuthor = author ? author.toLowerCase() : '';
+    
+    // 1. 检查标题是否完全包含查询词
+    if (lowerTitle.includes(lowerQuery)) {
+        score += 10;
+    }
+    
+    // 2. 检查标题是否包含查询词的主要部分
+    const queryWords = lowerQuery.split(/\s+/);
+    let matchedWords = 0;
+    
+    for (const word of queryWords) {
+        if (word.length > 2 && lowerTitle.includes(word)) {
+            matchedWords++;
+        }
+    }
+    
+    score += matchedWords * 3;
+    
+    // 3. 检查标题是否包含作者名
+    if (lowerAuthor && lowerTitle.includes(lowerAuthor)) {
+        score += 5;
+    }
+    
+    // 4. 检查是否是完全匹配
+    if (lowerTitle === lowerQuery) {
+        score += 20;
+    }
+    
+    // 5. 检查是否是知名书籍的变体
+    const knownBooks = {
+        "曾国藩传": ["曾国藩传", "曾国藩全传", "曾国藩传记"],
+        "曾国藩的正面与侧面": ["曾国藩的正面与侧面", "曾国藩正面与侧面"],
+        "晚清七十年": ["晚清七十年", "晚清70年"]
+    };
+    
+    for (const [knownTitle, variants] of Object.entries(knownBooks)) {
+        if (variants.some(variant => lowerTitle.includes(variant.toLowerCase()))) {
+            score += 15;
+            break;
+        }
+    }
+    
+    return score;
 }
 
 // =======================================================
