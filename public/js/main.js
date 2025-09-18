@@ -1,193 +1,92 @@
-// 智能阅读助手主逻辑
-document.addEventListener('DOMContentLoaded', () => {
-    // DOM元素
-    const userInput = document.getElementById('user-input');
-    const submitBtn = document.getElementById('submit-btn');
+// 等待DOM完全加载后执行
+document.addEventListener('DOMContentLoaded', function() {
+    // 获取关键DOM元素（确保ID与HTML一致）
+    const searchBtn = document.getElementById('search-btn');
+    const queryInput = document.getElementById('query-input');
     const resultsContainer = document.getElementById('results-container');
     const infoBox = document.getElementById('info-box');
-    const apiKeyInput = document.getElementById('api-key-input');
-    const saveApiKeyBtn = document.getElementById('save-api-key');
-    const clearApiKeyBtn = document.getElementById('clear-api-key');
-    const loadingIndicator = document.getElementById('loading-indicator');
+    const loadingSpinner = document.getElementById('loading-spinner');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsModal = document.getElementById('settings-modal');
+    const closeModalBtn = document.getElementById('close-modal-btn');
 
-    // 初始化：检查保存的API Key
-    const savedApiKey = localStorage.getItem('geminiApiKey');
-    if (savedApiKey) {
-        apiKeyInput.value = savedApiKey;
-        infoBox.textContent = '已加载保存的API Key';
-        infoBox.style.display = 'block';
+    // 检查元素是否存在（避免因元素缺失导致后续代码中断）
+    if (!searchBtn || !queryInput || !resultsContainer) {
+        console.error('关键DOM元素缺失，检查HTML中的ID是否正确');
+        return;
     }
 
-    // 保存API Key到本地存储
-    saveApiKeyBtn.addEventListener('click', () => {
-        const key = apiKeyInput.value.trim();
-        if (key) {
-            localStorage.setItem('geminiApiKey', key);
-            infoBox.textContent = 'API Key已保存';
-            infoBox.style.display = 'block';
-        } else {
-            infoBox.textContent = '请输入有效的API Key';
-            infoBox.style.display = 'block';
-        }
-    });
-
-    // 清除保存的API Key
-    clearApiKeyBtn.addEventListener('click', () => {
-        localStorage.removeItem('geminiApiKey');
-        apiKeyInput.value = '';
-        infoBox.textContent = 'API Key已清除';
-        infoBox.style.display = 'block';
-    });
-
-    // 提交查询
-    submitBtn.addEventListener('click', handleSubmit);
-    userInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleSubmit();
-    });
-
-    // 点击镜像链接下拉按钮
-    resultsContainer.addEventListener('click', (e) => {
-        if (e.target.classList.contains('toggle-btn')) {
-            const targetId = e.target.getAttribute('data-target');
-            const dropdown = document.getElementById(targetId);
-            if (dropdown) {
-                dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
-            }
-        }
-
-        // 处理镜像链接点击反馈
-        if (e.target.classList.contains('mirror-link')) {
-            const mirrorUrl = e.target.getAttribute('href');
-            const mirrorText = e.target.textContent;
-            
-            // 5秒后询问用户是否成功访问
-            setTimeout(() => {
-                if (!window.confirm(`是否成功访问 "${mirrorText}"？\n若未成功，建议尝试其他镜像。`)) {
-                    e.target.classList.add('unreachable');
-                    e.target.title = '该镜像可能无法访问';
-                }
-            }, 5000);
-        }
-    });
-
-    // 处理查询提交
-    async function handleSubmit() {
-        const query = userInput.value.trim();
-        const apiKey = apiKeyInput.value.trim();
-
-        if (!query) {
-            infoBox.textContent = '请输入你的阅读需求';
-            infoBox.style.display = 'block';
-            return;
-        }
-
-        if (!apiKey) {
-            infoBox.textContent = '请输入并保存你的Gemini API Key';
-            infoBox.style.display = 'block';
+    // 搜索按钮点击事件（核心修复：确保事件正确绑定）
+    searchBtn.addEventListener('click', async function() {
+        const userQuery = queryInput.value.trim();
+        if (!userQuery) {
+            alert('请输入阅读需求后再生成计划');
             return;
         }
 
         // 显示加载状态
-        loadingIndicator.style.display = 'block';
+        loadingSpinner.style.display = 'block';
         resultsContainer.innerHTML = '';
         infoBox.style.display = 'none';
 
         try {
-            // 构建提示并调用AI
-            const prompt = buildUltimatePrompt(query);
-            const response = await fetch('/proxy', {
+            // 验证API Key是否存在
+            const apiKeys = JSON.parse(localStorage.getItem('geminiApiKeys') || '[]');
+            if (apiKeys.length === 0) {
+                alert('请先在设置中添加Google Gemini API Key');
+                loadingSpinner.style.display = 'none';
+                return;
+            }
+            const apiKey = apiKeys[0]; // 使用第一个可用的API Key
+
+            // 构建请求参数（修复Prompt格式，避免JSON解析错误）
+            const promptConfig = buildUltimatePrompt(userQuery);
+            const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=' + apiKey, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ apiKey, body: prompt })
+                body: JSON.stringify(promptConfig)
             });
 
             if (!response.ok) {
                 throw new Error(`API请求失败: ${response.statusText}`);
             }
 
-            const result = await response.json();
-            displayResults(result);
+            const data = await response.json();
+            // 解析AI返回的JSON（修复：确保从正确的字段提取内容）
+            const aiResponseText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!aiResponseText) {
+                throw new Error('AI返回格式异常，无法提取内容');
+            }
+
+            const report = JSON.parse(aiResponseText); // 解析JSON报告
+            displayResults(report); // 展示结果
+            infoBox.style.display = 'block';
+
         } catch (error) {
-            console.error('处理请求时出错:', error);
-            displayError(`处理请求时出错: ${error.message}`);
+            // 错误处理（修复：明确提示错误原因）
+            console.error('生成失败:', error);
+            resultsContainer.innerHTML = `
+                <div class="error-message">
+                    <p>生成阅读计划时出错：${error.message}</p>
+                    <p>请检查API Key是否有效，或稍后再试</p>
+                </div>
+            `;
         } finally {
-            loadingIndicator.style.display = 'none';
+            loadingSpinner.style.display = 'none'; // 无论成功失败都隐藏加载
         }
-    }
+    });
 
-    // 构建AI提示 - 强化镜像安全与时效性
-    function buildUltimatePrompt(userQuery) {
-        const instruction = `
-你是一个严谨的图书资源安全专家，必须严格遵守以下规则生成JSON报告：
-
-**CRITICAL SAFETY RULES (最高优先级):**
-1. 绝对禁止提供任何涉及色情、恶意软件、赌博或非图书内容的网站，包括曾被用于此类目的的域名。
-2. 镜像安全性验证标准：
-   - 必须来自近30天内社区确认可用的列表（如r/AnnaArchivist、Z-Library官方论坛）；
-   - 域名历史无不良记录（通过WHOIS或信誉平台验证）；
-   - 必须支持HTTPS加密连接；
-   - 排除任何被主流安全软件标记为危险的域名。
-
-**最终JSON报告结构（必须严格遵守）：**
-{
-  "reading_plan": {
-    "planTitle": "根据用户需求生成的阅读计划标题",
-    "description": "对阅读计划的简要说明",
-    "books": [
-      {
-        "title": "书籍标题",
-        "author": "作者名",
-        "description": "书籍简介",
-        "reason": "推荐理由"
-      }
-    ]
-  },
-  "resource_access": {
-    "anna_archive": [
-      {
-        "url": "https://...", // 镜像完整URL
-        "domain": "example.com", // 提取域名
-        "last_verified": "2024-06-01", // 最近验证日期（近30天内）
-        "source": "社区推荐" // 验证来源（如"官方公告"、"用户反馈"）
-      }
-    ],
-    "z_library": [ // 同上结构
-      { "url": "...", "domain": "...", "last_verified": "...", "source": "..." }
-    ]
-  }
-}
-
-**执行指令:**
-1. 阅读计划保持3-5本书，结构不变；
-2. 镜像必须是近30天内可访问的最新地址，每个平台至少提供3个有效镜像；
-3. 按安全性优先级排序（官方镜像 > 社区高信誉镜像 > 普通镜像）；
-4. 若无法确认安全性，直接排除该镜像，不允许猜测；
-5. 输出必须是纯JSON，无任何额外文本。
-`;
-        return {
-            contents: [{ 
-                role: "user", 
-                parts: [
-                    { text: instruction }, 
-                    { text: "用户的阅读需求：" }, 
-                    { text: userQuery }
-                ] 
-            }],
-            generationConfig: { response_mime_type: "application/json" }
-        };
-    }
-
-    // 镜像安全二次校验
+    // 镜像安全二次校验（修复：日期处理兼容格式问题）
     function validateMirrorSafety(mirror) {
         try {
             const url = new URL(mirror.url);
-            // 规则1：必须使用HTTPS
+            // 必须使用HTTPS
             if (url.protocol !== 'https:') {
                 console.warn(`拒绝非HTTPS镜像: ${mirror.url}`);
                 return false;
             }
-            // 规则2：拦截已知可疑关键词
-            const suspiciousKeywords = ['porn', 'sex', 'malware', 'hack', 'crack', 'virus', 'adult'];
+            // 拦截可疑关键词
+            const suspiciousKeywords = ['porn', 'sex', 'malware', 'hack', 'crack'];
             const hasSuspicious = suspiciousKeywords.some(keyword => 
                 url.hostname.toLowerCase().includes(keyword)
             );
@@ -195,137 +94,172 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn(`拦截含可疑关键词的镜像: ${mirror.url}`);
                 return false;
             }
-            // 规则3：验证日期必须在近30天内
+            // 验证日期在30天内（兼容不同日期格式）
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
             const verifiedDate = new Date(mirror.last_verified);
-            if (verifiedDate < thirtyDaysAgo || isNaN(verifiedDate.getTime())) {
-                console.warn(`镜像验证过期或无效: ${mirror.url} (验证于 ${mirror.last_verified})`);
+            if (isNaN(verifiedDate.getTime()) || verifiedDate < thirtyDaysAgo) {
+                console.warn(`镜像验证过期或格式错误: ${mirror.url}`);
                 return false;
             }
             return true;
         } catch (error) {
-            console.warn(`无效URL格式: ${mirror.url}`);
+            console.warn(`无效URL: ${mirror.url}，错误: ${error.message}`);
             return false;
         }
     }
 
-    // 显示结果
+    // 构建AI提示词（修复：确保JSON格式严格）
+    function buildUltimatePrompt(userQuery) {
+        const instruction = `
+你是图书资源安全专家，必须返回严格符合以下格式的JSON：
+{
+  "reading_plan": {
+    "planTitle": "计划标题",
+    "books": [
+      {
+        "title": "书名",
+        "author": "作者",
+        "description": "描述",
+        "priority": "优先级"
+      }
+    ]
+  },
+  "resource_access": {
+    "anna_archive": [
+      { "url": "https://...", "domain": "...", "last_verified": "YYYY-MM-DD", "source": "..." }
+    ],
+    "z_library": [
+      { "url": "https://...", "domain": "...", "last_verified": "YYYY-MM-DD", "source": "..." }
+    ]
+  }
+}
+要求：1. 镜像必须是近30天内有效的HTTPS地址；2. 排除色情/恶意网站；3. 每个平台至少3个镜像。
+用户需求：${userQuery}
+输出必须是纯JSON，无额外文本！
+        `.trim();
+
+        return {
+            contents: [{ role: "user", parts: [{ text: instruction }] }],
+            generationConfig: { response_mime_type: "application/json" }
+        };
+    }
+
+    // 展示结果（修复：下拉菜单点击事件）
     function displayResults(report) {
         resultsContainer.innerHTML = '';
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = '<p>已生成阅读计划和可用资源链接</p>';
-        
-        const data = report?.reading_plan;
-        const resourceList = report?.resource_access;
-        
-        if (!data || !data.planTitle || !Array.isArray(data.books) || !resourceList) {
-            displayError("AI返回的报告结构不完整，无法解析。");
+        const books = report?.reading_plan?.books || [];
+        const resources = report?.resource_access || {};
+
+        if (books.length === 0) {
+            resultsContainer.innerHTML = '<p>未生成书籍计划，请检查输入后重试</p>';
             return;
         }
 
-        // 过滤安全的镜像
-        const annaMirrors = (resourceList.anna_archive || []).filter(validateMirrorSafety);
-        const zlibMirrors = (resourceList.z_library || []).filter(validateMirrorSafety);
+        // 过滤安全镜像
+        const annaMirrors = (resources.anna_archive || []).filter(validateMirrorSafety);
+        const zlibMirrors = (resources.z_library || []).filter(validateMirrorSafety);
 
-        // 显示镜像状态提示
-        if (annaMirrors.length === 0) {
-            infoBox.innerHTML += `<p>⚠️ 未找到安全可用的 Anna's Archive 镜像，请尝试其他平台。</p>`;
-        }
-        if (zlibMirrors.length === 0) {
-            infoBox.innerHTML += `<p>⚠️ 未找到安全可用的 Z-Library 镜像，请尝试其他平台。</p>`;
-        }
-
-        // 创建阅读计划标题
-        const planTitle = document.createElement('h2');
-        planTitle.className = 'plan-title';
-        planTitle.textContent = data.planTitle;
-        resultsContainer.appendChild(planTitle);
-
-        // 创建计划描述
-        const planDesc = document.createElement('p');
-        planDesc.className = 'plan-description';
-        planDesc.textContent = data.description || '根据你的阅读需求定制的阅读计划';
-        resultsContainer.appendChild(planDesc);
-
-        // 创建书籍列表
-        const booksGrid = document.createElement('div');
-        booksGrid.className = 'books-grid';
-        resultsContainer.appendChild(booksGrid);
-
-        // 为每本书创建卡片
-        data.books.forEach((book, index) => {
+        books.forEach((book, index) => {
             const bookCard = document.createElement('div');
-            bookCard.className = 'book-card';
-            
-            // 搜索关键词（用于构建搜索链接）
-            const searchQuery = encodeURIComponent(`${book.title} ${book.author}`);
-            
-            // 创建镜像链接下拉菜单
-            const annaHtml = createDropdownHTML(
-                `anna-archive-${index}`, 
-                "Anna's Archive", 
-                annaMirrors.length > 0 ? annaMirrors[0].url : '',
-                annaMirrors, 
-                `/search?q=${searchQuery}`
-            );
-            
-            const zlibHtml = createDropdownHTML(
-                `z-library-${index}`, 
-                "Z-Library", 
-                zlibMirrors.length > 0 ? zlibMirrors[0].url : '',
-                zlibMirrors, 
-                `/search?q=${searchQuery}`
-            );
-
+            bookCard.className = 'result-card';
             bookCard.innerHTML = `
-                <h3 class="book-title">${book.title}</h3>
-                <p class="book-author">作者: ${book.author || '未知'}</p>
-                <p class="book-description">${book.description || '无简介'}</p>
-                <p class="book-reason"><strong>推荐理由:</strong> ${book.reason || '无'}</p>
-                <div class="resource-links">
-                    ${annaHtml}
-                    ${zlibHtml}
+                <h3 class="book-title">${index + 1}. ${book.title}</h3>
+                <p><strong>作者：</strong>${book.author || '未知'}</p>
+                <p><strong>推荐理由：</strong>${book.description || '无'}</p>
+                <div class="links-container">
+                    ${createDropdownHTML(`anna-${index}`, "Anna's Archive", annaMirrors)}
+                    ${createDropdownHTML(`zlib-${index}`, "Z-Library", zlibMirrors)}
                 </div>
             `;
-            
-            booksGrid.appendChild(bookCard);
+            resultsContainer.appendChild(bookCard);
+        });
+
+        // 绑定下拉菜单切换事件（修复：动态元素事件委托）
+        document.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const targetId = this.getAttribute('data-target');
+                const dropdown = document.getElementById(targetId);
+                if (dropdown) {
+                    dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+                }
+            });
         });
     }
 
-    // 创建镜像下拉菜单HTML
-    function createDropdownHTML(id, label, defaultUrl, mirrors, searchPath) {
+    // 创建下拉菜单HTML（修复：确保链接可点击）
+    function createDropdownHTML(id, label, mirrors) {
         if (mirrors.length === 0) {
             return `<div class="links-wrapper">
                 <button class="toggle-btn" disabled>${label} (无安全镜像)</button>
             </div>`;
         }
 
-        let dropdownHtml = `<div class="mirror-links-dropdown" id="${id}" style="display:none;">`;
+        let dropdownHtml = `<div id="${id}" class="mirror-links-dropdown" style="display:none;">`;
         mirrors.forEach(mirror => {
-            // 构建完整搜索URL
-            const fullUrl = new URL(mirror.url);
-            fullUrl.pathname = searchPath.startsWith('/') ? searchPath : `/${searchPath}`;
-            
-            // 镜像显示文本
-            const displayText = `${mirror.domain} (验证于 ${mirror.last_verified}) - ${mirror.source}`;
-            
-            dropdownHtml += `<a href="${fullUrl.toString()}" target="_blank" class="mirror-link ${mirror.source.includes('官方') ? 'official-link' : ''}">
-                ${displayText}
+            dropdownHtml += `<a href="${mirror.url}" target="_blank" class="mirror-link">
+                ${mirror.domain}（验证于${mirror.last_verified}）
             </a>`;
         });
         dropdownHtml += `</div>`;
 
         return `<div class="links-wrapper">
-            <button class="toggle-btn" data-target="${id}">${label} (${mirrors.length}个安全镜像)</button>
+            <button class="toggle-btn" data-target="${id}">${label}（${mirrors.length}个镜像）</button>
             ${dropdownHtml}
         </div>`;
     }
 
-    // 显示错误信息
-    function displayError(message) {
-        infoBox.textContent = message;
-        infoBox.style.display = 'block';
-        infoBox.style.color = '#dc3545';
+    // 设置弹窗相关逻辑（修复：确保弹窗正常开关）
+    settingsBtn.addEventListener('click', () => {
+        settingsModal.style.display = 'flex';
+    });
+    closeModalBtn.addEventListener('click', () => {
+        settingsModal.style.display = 'none';
+    });
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) {
+            settingsModal.style.display = 'none'; // 点击外部关闭
+        }
+    });
+
+    // API Key管理（修复：本地存储操作）
+    const apiKeyInput = document.getElementById('api-key-input');
+    const addKeyBtn = document.getElementById('add-key-btn');
+    const keyListUl = document.getElementById('key-list-ul');
+
+    if (apiKeyInput && addKeyBtn && keyListUl) {
+        // 加载已保存的API Key
+        function loadApiKeys() {
+            const keys = JSON.parse(localStorage.getItem('geminiApiKeys') || '[]');
+            keyListUl.innerHTML = keys.map((key, i) => `
+                <li>
+                    <span>${key.substring(0, 8)}...${key.substring(key.length - 4)}</span>
+                    <button class="delete-key-btn" data-index="${i}">×</button>
+                </li>
+            `).join('');
+        }
+
+        addKeyBtn.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (key) {
+                const keys = JSON.parse(localStorage.getItem('geminiApiKeys') || '[]');
+                keys.push(key);
+                localStorage.setItem('geminiApiKeys', JSON.stringify(keys));
+                apiKeyInput.value = '';
+                loadApiKeys();
+            }
+        });
+
+        keyListUl.addEventListener('click', (e) => {
+            if (e.target.classList.contains('delete-key-btn')) {
+                const index = e.target.getAttribute('data-index');
+                const keys = JSON.parse(localStorage.getItem('geminiApiKeys') || '[]');
+                keys.splice(index, 1);
+                localStorage.setItem('geminiApiKeys', JSON.stringify(keys));
+                loadApiKeys();
+            }
+        });
+
+        loadApiKeys(); // 初始加载
     }
 });
