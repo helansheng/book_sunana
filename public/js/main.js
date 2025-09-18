@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', () => {
+﻿document.addEventListener('DOMContentLoaded', () => {
     // =======================================================
     // 配置区域
     // =======================================================
@@ -6,6 +6,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const API_TIMEOUT_MS = 60000;
     // 使用您提供的、经过验证的安全Z-Library官网域名
     const ZLIB_OFFICIAL_DOMAIN = "https://zh.z-lib.gd";
+    
+    // 新增：镜像发现功能配置
+    const MIRROR_DISCOVERY_ENABLED = true; // 是否启用智能镜像发现
+    const SAFETY_CHECK_ENABLED = true; // 是否启用安全筛选
+    const MIRROR_CACHE_DURATION = 60 * 60 * 1000; // 镜像缓存时间（1小时）
 
     // =======================================================
     // DOM元素获取
@@ -93,27 +98,226 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =======================================================
-    // 结果渲染函数 (恢复Z-Lib镜像并使用安全官网)
+    // 新增：智能镜像发现与安全验证模块
     // =======================================================
-    function displayResults(report) {
+
+    /**
+     * 获取AI推荐的、经过安全筛选的镜像列表
+     * @param {string} target - 'anna_archive' 或 'z_library'
+     * @returns {Promise<Array>} - 安全的镜像URL数组
+     */
+    async function fetchAIVerifiedMirrors(target) {
+        // 检查缓存
+        const cacheKey = `mirrors_${target}`;
+        const cached = getCachedMirrors(cacheKey);
+        if (cached && cached.length > 0) {
+            console.log(`使用缓存的镜像: ${target}`);
+            return cached;
+        }
+
+        if (!MIRROR_DISCOVERY_ENABLED) {
+            console.warn('智能镜像发现功能未启用，将使用备用镜像。');
+            return getFallbackMirrors(target);
+        }
+
+        try {
+            // 构建一个专门用于获取和验证镜像的Prompt
+            const mirrorPrompt = buildMirrorDiscoveryPrompt(target);
+            const response = await fetchAIResponseWithProxy({
+                body: {
+                    contents: [{
+                        role: "user",
+                        parts: [{ text: mirrorPrompt }]
+                    }],
+                    generationConfig: {
+                        response_mime_type: "application/json"
+                    }
+                }
+            });
+
+            // 解析AI返回的JSON，应包含verified_mirrors数组
+            const verifiedData = JSON.parse(extractJson(response));
+            const proposedMirrors = verifiedData.verified_mirrors || [];
+
+            if (proposedMirrors.length === 0) {
+                throw new Error("AI未返回任何推荐的镜像。");
+            }
+
+            // 可选：二次验证
+            let safeMirrors = proposedMirrors;
+            if (SAFETY_CHECK_ENABLED) {
+                safeMirrors = await quicklyVerifyMirrors(proposedMirrors);
+            }
+
+            // 缓存结果
+            if (safeMirrors.length > 0) {
+                cacheMirrors(cacheKey, safeMirrors);
+                return safeMirrors;
+            } else {
+                return getFallbackMirrors(target);
+            }
+
+        } catch (error) {
+            console.error(`获取AI验证的${target}镜像失败:`, error);
+            return getFallbackMirrors(target);
+        }
+    }
+
+    /**
+     * 构建专门用于发现和验证镜像的Prompt（关键安全加固）
+     */
+    function buildMirrorDiscoveryPrompt(targetSite) {
+        const siteName = targetSite === 'anna_archive' ? "Anna's Archive" : "Z-Library";
+        return `
+你是一名专业的网络安全和图书情报助手。你的唯一任务是发现并提供最新、可访问且绝对安全的${siteName}镜像站点。
+
+**指令：**
+1.  **发现镜像**：利用你的知识库或网络搜索能力（如果允许），找出当前最新、最稳定的${siteName}镜像站点URL（最多5个）。
+2.  **严格安全审查**：你必须对你提供的每一个镜像URL进行严格的安全性和内容审查。**绝对禁止**返回任何已知或疑似包含以下内容的网站：
+    - 成人内容、色情、赌博
+    - 恶意软件、网络钓鱼、诈骗
+    - 任何违法信息或非法内容
+    - 大量弹出广告或误导性链接
+    *注意：如果一个域名曾经是图书网站但现在被用于其他不良目的，你必须将其排除。*
+3.  **验证可访问性**：优先推荐那些从中国地区网络环境较易访问的镜像。
+4.  **输出格式**：你必须且只能返回一个JSON对象，格式如下：
+    {
+      "verified_mirrors": ["https://safe-mirror1.example", "https://safe-mirror2.example", ...]
+    }
+
+**请开始执行任务，确保你返回的所有镜像URL都是干净、安全且专用于图书获取的。**
+`;
+    }
+
+    /**
+     * 快速验证镜像数组（简单示例）
+     */
+    async function quicklyVerifyMirrors(mirrorUrls) {
+        const verificationPromises = mirrorUrls.map(async (url) => {
+            try {
+                const parsedUrl = new URL(url);
+                const suspiciousKeywords = ['porn', 'adult', 'casino', 'gambling', 'xxx', 'malware', 'scam'];
+                const domain = parsedUrl.hostname;
+
+                // 简单检查域名中是否包含可疑关键词
+                if (suspiciousKeywords.some(keyword => domain.includes(keyword))) {
+                    console.warn(`镜像URL因包含可疑关键词被过滤: ${url}`);
+                    return null;
+                }
+
+                return url;
+            } catch (error) {
+                console.warn(`验证镜像URL时出错 (${url}):`, error);
+                return null;
+            }
+        });
+
+        const results = await Promise.all(verificationPromises);
+        return results.filter(url => url !== null);
+    }
+
+    /**
+     * 备用镜像列表（当AI无法提供或验证失败时使用）
+     */
+    function getFallbackMirrors(target) {
+        const fallbackMirrors = {
+            anna_archive: [
+                "https://annas-archive.org",
+                "https://annas-archive.gs",
+            ],
+            z_library: [
+                "https://zh.z-lib.gd",
+                "https://z-library.wwwnav.com",
+                "https://zlibrary.2rdh.com",
+            ]
+        };
+        return fallbackMirrors[target] || [];
+    }
+
+    /**
+     * 从缓存获取镜像
+     */
+    function getCachedMirrors(key) {
+        try {
+            const cached = localStorage.getItem(key);
+            if (!cached) return null;
+            
+            const { timestamp, mirrors } = JSON.parse(cached);
+            if (Date.now() - timestamp < MIRROR_CACHE_DURATION) {
+                return mirrors;
+            }
+        } catch (e) {
+            console.error('读取镜像缓存失败:', e);
+        }
+        return null;
+    }
+
+    /**
+     * 缓存镜像
+     */
+    function cacheMirrors(key, mirrors) {
+        try {
+            localStorage.setItem(key, JSON.stringify({
+                timestamp: Date.now(),
+                mirrors: mirrors
+            }));
+        } catch (e) {
+            console.error('保存镜像缓存失败:', e);
+        }
+    }
+
+    // =======================================================
+    // 结果渲染函数 (整合镜像发现功能)
+    // =======================================================
+    async function displayResults(report) {
         resultsContainer.innerHTML = '';
         infoBox.style.display = 'block';
         const data = report?.reading_plan;
         const resourceList = report?.resource_access;
+        
         if (!data || !data.planTitle || !Array.isArray(data.books) || !resourceList) {
             displayError("AI返回的报告结构不完整，无法解析。");
             return;
         }
+        
+        // 显示计划标题
         const planTitleElement = document.createElement('h2');
         planTitleElement.className = 'plan-title';
         planTitleElement.style.textAlign = 'center';
         planTitleElement.style.marginBottom = '20px';
         planTitleElement.textContent = data.planTitle;
         resultsContainer.appendChild(planTitleElement);
+        
+        // 显示"正在获取最新镜像"提示
+        const mirrorLoadingDiv = document.createElement('div');
+        mirrorLoadingDiv.id = 'mirror-loading';
+        mirrorLoadingDiv.innerHTML = '<p>正在获取最新安全镜像...</p>';
+        resultsContainer.appendChild(mirrorLoadingDiv);
 
-        const annaMirrors = resourceList.anna_archive || [];
-        const zlibMirrors = resourceList.z_library || [];
+        // 获取AI验证的镜像
+        let annaMirrors = [];
+        let zlibMirrors = [];
+        
+        try {
+            [annaMirrors, zlibMirrors] = await Promise.all([
+                fetchAIVerifiedMirrors('anna_archive'),
+                fetchAIVerifiedMirrors('z_library')
+            ]);
+            
+            // 移除加载提示
+            mirrorLoadingDiv.remove();
+        } catch (error) {
+            console.error("获取镜像失败，使用报告中的或备用镜像:", error);
+            mirrorLoadingDiv.innerHTML = '<p>获取最新镜像失败，使用备用镜像</p>';
+            
+            // 5秒后移除提示
+            setTimeout(() => mirrorLoadingDiv.remove(), 5000);
+            
+            annaMirrors = resourceList.anna_archive || getFallbackMirrors('anna_archive');
+            zlibMirrors = resourceList.z_library || getFallbackMirrors('z_library');
+        }
 
+        // 渲染每本书的卡片
         data.books.forEach((book, index) => {
             const card = document.createElement('div');
             card.className = 'result-card';
@@ -239,18 +443,137 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // =======================================================
-    // 其他所有辅助函数 (无变化)
+    // 其他所有辅助函数
     // =======================================================
-    function createDropdownHTML(id,label,officialUrl,mirrors,searchPath){const links=[{url:officialUrl,name:"Official Site"},...mirrors.map(m=>{try{return{url:`${new URL(m).origin}${searchPath}`,name:new URL(m).hostname}}catch{return null}}).filter(Boolean)];let dropdownHtml=`<div class="mirror-links-dropdown" id="${id}" style="display:none;">`;links.forEach(link=>{const isOfficial=link.name==="Official Site";dropdownHtml+=`<a href="${link.url}" target="_blank" class="mirror-link ${isOfficial?'official-link':''}">${link.name} ${isOfficial?' (官网)':''}</a>`});dropdownHtml+=`</div>`;return`<div class="links-wrapper"><button class="toggle-btn" data-target="${id}">${label}</button>${dropdownHtml}</div>`}
-    function extractJson(e){const t=e.match(/```json\s*([\s\S]*?)\s*```/);return t&&t[1]?t[1]:e}
-    function displayError(e){setLoadingState(!1),resultsContainer.innerHTML=`<div class="error-message"><h3>糟糕，出错了！</h3><p>${e}</p><p>请检查你的网络连接和API Key配置，然后重试。</p></div>`}
-    function setLoadingState(e,t){searchBtn.disabled=e,e?(searchBtn.textContent=t||"思考中...",resultsContainer.innerHTML="",loadingSpinner.style.display="block",resultsContainer.appendChild(loadingSpinner)):(searchBtn.textContent="生成阅读计划",loadingSpinner.style.display="none")}
-    function loadKeysFromStorage(){const e=localStorage.getItem("geminiApiKeys");apiKeys=e?JSON.parse(e):[],updateUIOnKeyChange(),renderKeyList()}
-    function saveKeysToStorage(){localStorage.setItem("geminiApiKeys",JSON.stringify(apiKeys))}
-    function renderKeyList(){if(keyListUl.innerHTML="",0===apiKeys.length)return void(keyListUl.innerHTML="<li>暂无 API Key。</li>");apiKeys.forEach((e,t)=>{const s=`${e.substring(0,4)}...${e.substring(e.length-4)}`,o=document.createElement("li");o.innerHTML=`<span>${s}</span><button class="delete-key-btn" data-index="${t}" title="删除">&times;</button>`,keyListUl.appendChild(o)})}
-    function addKey(){const e=apiKeyInput.value.trim();e&&!apiKeys.includes(e)?(apiKeys.push(e),saveKeysToStorage(),renderKeyList(),updateUIOnKeyChange(),apiKeyInput.value=""):apiKeys.includes(e)&&alert("这个 API Key 已经存在了。")}
-    function deleteKey(e){apiKeys.splice(e,1),saveKeysToStorage(),renderKeyList(),updateUIOnKeyChange()}
-    function updateUIOnKeyChange(){0===apiKeys.length?(searchBtn.disabled=!0,searchBtn.textContent="请先设置 API Key"):(searchBtn.disabled=!1,searchBtn.textContent="生成阅读计划")}
-    searchBtn.addEventListener("click",handleSearch),settingsBtn.addEventListener("click",()=>{settingsModal.style.display="flex"}),closeModalBtn.addEventListener("click",()=>{settingsModal.style.display="none"}),settingsModal.addEventListener("click",e=>{e.target===settingsModal&&(settingsModal.style.display="none")}),addKeyBtn.addEventListener("click",addKey),apiKeyInput.addEventListener("keyup",e=>{"Enter"===e.key&&addKey()}),keyListUl.addEventListener("click",e=>{if(e.target.classList.contains("delete-key-btn")){const t=parseInt(e.target.dataset.index,10);deleteKey(t)}});
+    function createDropdownHTML(id, label, officialUrl, mirrors, searchPath) {
+        const links = [
+            { url: officialUrl, name: "Official Site" },
+            ...mirrors.map(m => {
+                try {
+                    return { url: `${new URL(m).origin}${searchPath}`, name: new URL(m).hostname };
+                } catch {
+                    return null;
+                }
+            }).filter(Boolean)
+        ];
+        
+        let dropdownHtml = `<div class="mirror-links-dropdown" id="${id}" style="display:none;">`;
+        links.forEach(link => {
+            const isOfficial = link.name === "Official Site";
+            dropdownHtml += `<a href="${link.url}" target="_blank" class="mirror-link ${isOfficial ? 'official-link' : ''}">${link.name} ${isOfficial ? ' (官网)' : ''}</a>`;
+        });
+        dropdownHtml += `</div>`;
+        
+        return `<div class="links-wrapper"><button class="toggle-btn" data-target="${id}">${label}</button>${dropdownHtml}</div>`;
+    }
+    
+    function extractJson(text) {
+        const match = text.match(/```json\s*([\s\S]*?)\s*```/);
+        return match && match[1] ? match[1] : text;
+    }
+    
+    function displayError(message) {
+        setLoadingState(false);
+        resultsContainer.innerHTML = `<div class="error-message"><h3>糟糕，出错了！</h3><p>${message}</p><p>请检查你的网络连接和API Key配置，然后重试。</p></div>`;
+    }
+    
+    function setLoadingState(isLoading, message) {
+        searchBtn.disabled = isLoading;
+        if (isLoading) {
+            searchBtn.textContent = message || "思考中...";
+            resultsContainer.innerHTML = "";
+            loadingSpinner.style.display = "block";
+            resultsContainer.appendChild(loadingSpinner);
+        } else {
+            searchBtn.textContent = "生成阅读计划";
+            loadingSpinner.style.display = "none";
+        }
+    }
+    
+    function loadKeysFromStorage() {
+        const keys = localStorage.getItem("geminiApiKeys");
+        apiKeys = keys ? JSON.parse(keys) : [];
+        updateUIOnKeyChange();
+        renderKeyList();
+    }
+    
+    function saveKeysToStorage() {
+        localStorage.setItem("geminiApiKeys", JSON.stringify(apiKeys));
+    }
+    
+    function renderKeyList() {
+        keyListUl.innerHTML = "";
+        if (apiKeys.length === 0) {
+            keyListUl.innerHTML = "<li>暂无 API Key。</li>";
+            return;
+        }
+        
+        apiKeys.forEach((key, index) => {
+            const maskedKey = `${key.substring(0, 4)}...${key.substring(key.length - 4)}`;
+            const li = document.createElement("li");
+            li.innerHTML = `<span>${maskedKey}</span><button class="delete-key-btn" data-index="${index}" title="删除">&times;</button>`;
+            keyListUl.appendChild(li);
+        });
+    }
+    
+    function addKey() {
+        const key = apiKeyInput.value.trim();
+        if (key && !apiKeys.includes(key)) {
+            apiKeys.push(key);
+            saveKeysToStorage();
+            renderKeyList();
+            updateUIOnKeyChange();
+            apiKeyInput.value = "";
+        } else if (apiKeys.includes(key)) {
+            alert("这个 API Key 已经存在了。");
+        }
+    }
+    
+    function deleteKey(index) {
+        apiKeys.splice(index, 1);
+        saveKeysToStorage();
+        renderKeyList();
+        updateUIOnKeyChange();
+    }
+    
+    function updateUIOnKeyChange() {
+        if (apiKeys.length === 0) {
+            searchBtn.disabled = true;
+            searchBtn.textContent = "请先设置 API Key";
+        } else {
+            searchBtn.disabled = false;
+            searchBtn.textContent = "生成阅读计划";
+        }
+    }
+
+    // =======================================================
+    // 初始化事件监听器
+    // =======================================================
+    searchBtn.addEventListener("click", handleSearch);
+    settingsBtn.addEventListener("click", () => {
+        settingsModal.style.display = "flex";
+    });
+    closeModalBtn.addEventListener("click", () => {
+        settingsModal.style.display = "none";
+    });
+    settingsModal.addEventListener("click", (e) => {
+        if (e.target === settingsModal) {
+            settingsModal.style.display = "none";
+        }
+    });
+    addKeyBtn.addEventListener("click", addKey);
+    apiKeyInput.addEventListener("keyup", (e) => {
+        if (e.key === "Enter") {
+            addKey();
+        }
+    });
+    keyListUl.addEventListener("click", (e) => {
+        if (e.target.classList.contains("delete-key-btn")) {
+            const index = parseInt(e.target.dataset.index, 10);
+            deleteKey(index);
+        }
+    });
+
+    // 初始化加载API Keys
     loadKeysFromStorage();
 });
