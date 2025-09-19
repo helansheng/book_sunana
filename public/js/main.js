@@ -1,4 +1,5 @@
-﻿document.addEventListener('DOMContentLoaded', () => {
+// js/main.js - 完整版本，保留镜像发现功能
+document.addEventListener('DOMContentLoaded', () => {
     // =======================================================
     // 配置区域
     // =======================================================
@@ -307,14 +308,20 @@
             const zlibOfficialUrl = `${ZLIB_OFFICIAL_DOMAIN}/s?q=${searchQuery}`;
             const zlibHtml = createDropdownHTML(`z-library-${index}`, "Z-Library", zlibOfficialUrl, zlibMirrors, `/s?q=${searchQuery}`);
 
-// 修改这行代码
-const chineseSitesHtml = `
-    <div class="chinese-sites-container">
-        <button class="scrape-btn" data-target="xiaolipan" data-query="${book.title}" data-isbn="${book.isbn_13 || ''}" data-author="${book.author || ''}">从小立盘获取 ⏬</button>
-        <button class="scrape-btn" data-target="book5678" data-query="${book.title}" data-isbn="${book.isbn_13 || ''}" data-author="${book.author || ''}">从Book5678获取 ⏬</button>
-        <button class="scrape-btn" data-target="35ppt" data-query="${book.title}" data-isbn="${book.isbn_13 || ''}" data-author="${book.author || ''}">从35PPT获取 ⏬</button>
-    </div>
-`;
+            // 中文网站直接搜索链接
+            const chineseSitesHtml = `
+                <div class="chinese-sites-container">
+                    <a href="https://www.xiaolipan.com/search.html?keyword=${searchQuery}" target="_blank" class="search-link-btn xiaolipan-btn">
+                        <span>在小立盘搜索</span>
+                    </a>
+                    <a href="https://book5678.com/search.php?q=${searchQuery}" target="_blank" class="search-link-btn book5678-btn">
+                        <span>在Book5678搜索</span>
+                    </a>
+                    <a href="https://www.35ppt.com/?s=${searchQuery}" target="_blank" class="search-link-btn ppt35-btn">
+                        <span>在35PPT搜索</span>
+                    </a>
+                </div>
+            `;
             
             let availabilityHtml = '';
             if (book.availability) {
@@ -334,7 +341,6 @@ const chineseSitesHtml = `
                     ${annaHtml}
                     ${zlibHtml}
                     ${chineseSitesHtml}
-                    <div class="direct-links-container" id="direct-links-${index}"></div>
                 </div>
             `;
             resultsContainer.appendChild(card);
@@ -344,21 +350,18 @@ const chineseSitesHtml = `
     // =======================================================
     // API调用函数
     // =======================================================
-    async function fetchAIResponseWithProxy({ body, scrapeTask }) {
-        if (apiKeys.length === 0 && !scrapeTask) {
+    async function fetchAIResponseWithProxy({ body }) {
+        if (apiKeys.length === 0) {
              throw new Error("请先设置 API Key。");
         }
-        let currentKey = null;
-        if (!scrapeTask) {
-            if (currentKeyIndex >= apiKeys.length) throw new Error("您提供的所有API Key都已尝试过或均无效/超时。");
-            currentKey = apiKeys[currentKeyIndex];
-        }
+        if (currentKeyIndex >= apiKeys.length) throw new Error("您提供的所有API Key都已尝试过或均无效/超时。");
+        const currentKey = apiKeys[currentKeyIndex];
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
         try {
-            const payload = scrapeTask ? { scrapeTask } : { apiKey: currentKey, body };
+            const payload = { apiKey: currentKey, body };
             const response = await fetch(PROXY_ENDPOINT, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -374,128 +377,18 @@ const chineseSitesHtml = `
             }
 
             const data = await response.json();
-            if (scrapeTask) return data;
             if (!data.candidates) throw new Error("API响应格式不正确。");
             return JSON.parse(extractJson(data.candidates[0].content.parts[0].text));
         } catch (error) {
             clearTimeout(timeoutId);
-            if (!scrapeTask && (error.name === 'AbortError' || error instanceof TypeError || error.message.includes("服务器返回错误"))) {
+            if (error.name === 'AbortError' || error instanceof TypeError || error.message.includes("服务器返回错误")) {
                  currentKeyIndex++;
-                 return fetchAIResponseWithProxy({ body, scrapeTask });
+                 return fetchAIResponseWithProxy({ body });
             }
             throw error;
         }
     }
 
-// =======================================================
-// 事件监听器
-// =======================================================
-resultsContainer.addEventListener('click', async (event) => {
-    const target = event.target;
-    if (target.classList.contains('toggle-btn')) {
-        const targetId = target.dataset.target;
-        const dropdown = document.getElementById(targetId);
-        if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
-    }
-    if (target.classList.contains('scrape-btn')) {
-        const site = target.dataset.target;
-        const query = target.dataset.query;
-        const isbn = target.dataset.isbn;
-        const author = target.dataset.author;
-        const card = target.closest('.result-card');
-        const linksContainer = card.querySelector('.direct-links-container');
-        
-        const originalText = target.textContent;
-        target.textContent = '正在获取...';
-        target.disabled = true;
-        linksContainer.innerHTML = '<div class="loading-text">正在搜索相关书籍...</div>';
-        
-        try {
-            const response = await fetch('/proxy', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ scrapeTask: { target: site, query, isbn, author } })
-            });
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.details || errorData.error?.message || `服务器返回错误: ${response.status}`);
-            }
-            
-            const bookLinks = await response.json();
-            
-            if (bookLinks && Array.isArray(bookLinks) && bookLinks.length > 0) {
-                linksContainer.innerHTML = '';
-                bookLinks.forEach(link => {
-                    const div = document.createElement('div');
-                    div.className = 'book-link-item';
-                    div.style.marginBottom = '10px';
-                    div.style.padding = '8px';
-                    div.style.border = '1px solid #eee';
-                    div.style.borderRadius = '4px';
-                    div.style.backgroundColor = '#f9f9f9';
-                    
-                    // 创建详情页链接
-                    const detailLink = document.createElement('a');
-                    detailLink.href = link.detailUrl;
-                    detailLink.textContent = `${link.site}: ${link.title}`;
-                    detailLink.target = '_blank';
-                    detailLink.className = 'book-detail-link';
-                    detailLink.style.color = '#3498db';
-                    detailLink.style.textDecoration = 'none';
-                    detailLink.style.fontWeight = 'bold';
-                    detailLink.style.display = 'block';
-                    detailLink.style.marginBottom = '5px';
-                    
-                    div.appendChild(detailLink);
-                    
-                    // 添加详情页链接按钮
-                    const detailButton = document.createElement('a');
-                    detailButton.href = link.detailUrl;
-                    detailButton.textContent = '查看详情';
-                    detailButton.target = '_blank';
-                    detailButton.className = 'book-link-button';
-                    detailButton.style.marginRight = '10px';
-                    detailButton.style.padding = '5px 10px';
-                    detailButton.style.backgroundColor = '#3498db';
-                    detailButton.style.color = 'white';
-                    detailButton.style.textDecoration = 'none';
-                    detailButton.style.borderRadius = '3px';
-                    detailButton.style.fontSize = '0.9em';
-                    
-                    div.appendChild(detailButton);
-                    
-                    // 如果有下载页链接，也添加
-                    if (link.downloadUrl) {
-                        const downloadButton = document.createElement('a');
-                        downloadButton.href = link.downloadUrl;
-                        downloadButton.textContent = '下载页面';
-                        downloadButton.target = '_blank';
-                        downloadButton.className = 'book-link-button';
-                        downloadButton.style.padding = '5px 10px';
-                        downloadButton.style.backgroundColor = '#2ecc71';
-                        downloadButton.style.color = 'white';
-                        downloadButton.style.textDecoration = 'none';
-                        downloadButton.style.borderRadius = '3px';
-                        downloadButton.style.fontSize = '0.9em';
-                        
-                        div.appendChild(downloadButton);
-                    }
-                    
-                    linksContainer.appendChild(div);
-                });
-            } else {
-                linksContainer.innerHTML = `<span class="scrape-not-found">未找到相关书籍，请尝试其他资源。</span>`;
-            }
-        } catch (error) {
-            console.error(`${site} scraper failed:`, error);
-            linksContainer.innerHTML = `<span class="scrape-not-found">获取失败: ${error.message}</span>`;
-        } finally {
-            target.textContent = originalText;
-            target.disabled = false;
-        }
-    }
-});
     // =======================================================
     // 辅助函数
     // =======================================================
@@ -601,8 +494,17 @@ resultsContainer.addEventListener('click', async (event) => {
     }
 
     // =======================================================
-    // 初始化事件监听器
+    // 事件监听器
     // =======================================================
+    resultsContainer.addEventListener('click', (event) => {
+        const target = event.target;
+        if (target.classList.contains('toggle-btn')) {
+            const targetId = target.dataset.target;
+            const dropdown = document.getElementById(targetId);
+            if (dropdown) dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        }
+    });
+
     searchBtn.addEventListener("click", handleSearch);
     settingsBtn.addEventListener("click", () => {
         settingsModal.style.display = "flex";
