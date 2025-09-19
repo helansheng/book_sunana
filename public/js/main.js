@@ -402,7 +402,8 @@ resultsContainer.addEventListener('click', async (event) => {
         const query = target.dataset.query;
         const isbn = target.dataset.isbn;
         const author = target.dataset.author;
-        const linksContainer = target.closest('.result-card').querySelector('.direct-links-container');
+        const card = target.closest('.result-card');
+        const linksContainer = card.querySelector('.direct-links-container');
         
         const originalText = target.textContent;
         target.textContent = '正在获取...';
@@ -429,8 +430,10 @@ resultsContainer.addEventListener('click', async (event) => {
                     const div = document.createElement('div');
                     div.className = 'book-link-item';
                     div.style.marginBottom = '10px';
+                    div.style.padding = '5px';
+                    div.style.border = '1px solid #eee';
+                    div.style.borderRadius = '4px';
                     
-                    // 创建详情页链接
                     const detailLink = document.createElement('a');
                     detailLink.href = link.detailUrl;
                     detailLink.textContent = `${link.site}: ${link.title}`;
@@ -438,17 +441,28 @@ resultsContainer.addEventListener('click', async (event) => {
                     detailLink.className = 'book-detail-link';
                     detailLink.style.color = '#3498db';
                     detailLink.style.textDecoration = 'none';
+                    detailLink.style.fontWeight = 'bold';
                     
                     div.appendChild(detailLink);
                     
-                    // 如果有下载页链接，也添加
+                    div.appendChild(document.createElement('br'));
+                    
+                    const detailPageLink = document.createElement('a');
+                    detailPageLink.href = link.detailUrl;
+                    detailPageLink.textContent = '查看详情';
+                    detailPageLink.target = '_blank';
+                    detailPageLink.style.marginRight = '10px';
+                    detailPageLink.style.color = '#3498db';
+                    detailPageLink.style.textDecoration = 'none';
+                    
+                    div.appendChild(detailPageLink);
+                    
                     if (link.downloadUrl) {
                         const downloadLink = document.createElement('a');
                         downloadLink.href = link.downloadUrl;
                         downloadLink.textContent = '下载页面';
                         downloadLink.target = '_blank';
                         downloadLink.className = 'book-download-link';
-                        downloadLink.style.marginLeft = '10px';
                         downloadLink.style.color = '#2ecc71';
                         downloadLink.style.textDecoration = 'none';
                         downloadLink.style.fontWeight = 'bold';
@@ -470,7 +484,6 @@ resultsContainer.addEventListener('click', async (event) => {
         }
     }
 });
-
     // =======================================================
     // 辅助函数
     // =======================================================
