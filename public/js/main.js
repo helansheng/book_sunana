@@ -430,10 +430,12 @@ resultsContainer.addEventListener('click', async (event) => {
                     const div = document.createElement('div');
                     div.className = 'book-link-item';
                     div.style.marginBottom = '10px';
-                    div.style.padding = '5px';
+                    div.style.padding = '8px';
                     div.style.border = '1px solid #eee';
                     div.style.borderRadius = '4px';
+                    div.style.backgroundColor = '#f9f9f9';
                     
+                    // 创建详情页链接
                     const detailLink = document.createElement('a');
                     detailLink.href = link.detailUrl;
                     detailLink.textContent = `${link.site}: ${link.title}`;
@@ -442,32 +444,42 @@ resultsContainer.addEventListener('click', async (event) => {
                     detailLink.style.color = '#3498db';
                     detailLink.style.textDecoration = 'none';
                     detailLink.style.fontWeight = 'bold';
+                    detailLink.style.display = 'block';
+                    detailLink.style.marginBottom = '5px';
                     
                     div.appendChild(detailLink);
                     
-                    div.appendChild(document.createElement('br'));
+                    // 添加详情页链接按钮
+                    const detailButton = document.createElement('a');
+                    detailButton.href = link.detailUrl;
+                    detailButton.textContent = '查看详情';
+                    detailButton.target = '_blank';
+                    detailButton.className = 'book-link-button';
+                    detailButton.style.marginRight = '10px';
+                    detailButton.style.padding = '5px 10px';
+                    detailButton.style.backgroundColor = '#3498db';
+                    detailButton.style.color = 'white';
+                    detailButton.style.textDecoration = 'none';
+                    detailButton.style.borderRadius = '3px';
+                    detailButton.style.fontSize = '0.9em';
                     
-                    const detailPageLink = document.createElement('a');
-                    detailPageLink.href = link.detailUrl;
-                    detailPageLink.textContent = '查看详情';
-                    detailPageLink.target = '_blank';
-                    detailPageLink.style.marginRight = '10px';
-                    detailPageLink.style.color = '#3498db';
-                    detailPageLink.style.textDecoration = 'none';
+                    div.appendChild(detailButton);
                     
-                    div.appendChild(detailPageLink);
-                    
+                    // 如果有下载页链接，也添加
                     if (link.downloadUrl) {
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = link.downloadUrl;
-                        downloadLink.textContent = '下载页面';
-                        downloadLink.target = '_blank';
-                        downloadLink.className = 'book-download-link';
-                        downloadLink.style.color = '#2ecc71';
-                        downloadLink.style.textDecoration = 'none';
-                        downloadLink.style.fontWeight = 'bold';
+                        const downloadButton = document.createElement('a');
+                        downloadButton.href = link.downloadUrl;
+                        downloadButton.textContent = '下载页面';
+                        downloadButton.target = '_blank';
+                        downloadButton.className = 'book-link-button';
+                        downloadButton.style.padding = '5px 10px';
+                        downloadButton.style.backgroundColor = '#2ecc71';
+                        downloadButton.style.color = 'white';
+                        downloadButton.style.textDecoration = 'none';
+                        downloadButton.style.borderRadius = '3px';
+                        downloadButton.style.fontSize = '0.9em';
                         
-                        div.appendChild(downloadLink);
+                        div.appendChild(downloadButton);
                     }
                     
                     linksContainer.appendChild(div);
