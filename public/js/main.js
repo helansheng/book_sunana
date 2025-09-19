@@ -402,22 +402,33 @@ resultsContainer.addEventListener('click', async (event) => {
         const query = target.dataset.query;
         const isbn = target.dataset.isbn;
         const author = target.dataset.author;
-        const linksContainer = target.parentElement.parentElement.querySelector('.direct-links-container');
+        const linksContainer = target.closest('.result-card').querySelector('.direct-links-container');
         
+        const originalText = target.textContent;
         target.textContent = '正在获取...';
         target.disabled = true;
         linksContainer.innerHTML = '<div class="loading-text">正在搜索相关书籍...</div>';
         
         try {
-            const bookLinks = await fetchAIResponseWithProxy({ 
-                scrapeTask: { target: site, query, isbn, author } 
+            const response = await fetch('/proxy', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scrapeTask: { target: site, query, isbn, author } })
             });
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.details || errorData.error?.message || `服务器返回错误: ${response.status}`);
+            }
+            
+            const bookLinks = await response.json();
             
             if (bookLinks && Array.isArray(bookLinks) && bookLinks.length > 0) {
                 linksContainer.innerHTML = '';
                 bookLinks.forEach(link => {
                     const div = document.createElement('div');
                     div.className = 'book-link-item';
+                    div.style.marginBottom = '10px';
                     
                     // 创建详情页链接
                     const detailLink = document.createElement('a');
@@ -425,6 +436,8 @@ resultsContainer.addEventListener('click', async (event) => {
                     detailLink.textContent = `${link.site}: ${link.title}`;
                     detailLink.target = '_blank';
                     detailLink.className = 'book-detail-link';
+                    detailLink.style.color = '#3498db';
+                    detailLink.style.textDecoration = 'none';
                     
                     div.appendChild(detailLink);
                     
@@ -436,6 +449,9 @@ resultsContainer.addEventListener('click', async (event) => {
                         downloadLink.target = '_blank';
                         downloadLink.className = 'book-download-link';
                         downloadLink.style.marginLeft = '10px';
+                        downloadLink.style.color = '#2ecc71';
+                        downloadLink.style.textDecoration = 'none';
+                        downloadLink.style.fontWeight = 'bold';
                         
                         div.appendChild(downloadLink);
                     }
@@ -449,7 +465,8 @@ resultsContainer.addEventListener('click', async (event) => {
             console.error(`${site} scraper failed:`, error);
             linksContainer.innerHTML = `<span class="scrape-not-found">获取失败: ${error.message}</span>`;
         } finally {
-            target.style.display = 'none';
+            target.textContent = originalText;
+            target.disabled = false;
         }
     }
 });
