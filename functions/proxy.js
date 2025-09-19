@@ -1,4 +1,4 @@
-// /functions/proxy.js - 智能中文图书搜索系统
+// /functions/proxy.js - 通用中文图书搜索系统
 
 // =======================================================
 // 主路由函数
@@ -93,53 +93,59 @@ async function handleBookSiteScraper(target, query, isbn, author) {
 }
 
 // =======================================================
-// 小立盘 (xiaolipan.com) 爬取函数
+// 通用搜索函数
 // =======================================================
-async function scrapeXiaolipan(query, isbn, author) {
-    const bookLinks = [];
-    
+async function performSearch(searchUrl, headers, parser, query, author) {
     try {
-        // 构建搜索URL
-        const searchUrl = `https://www.xiaolipan.com/search.html?keyword=${encodeURIComponent(query)}`;
-        console.log(`小立盘搜索URL: ${searchUrl}`);
-        
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.xiaolipan.com/',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        };
+        console.log(`搜索URL: ${searchUrl}`);
         
         // 执行搜索
         const response = await fetch(searchUrl, { headers });
         
         if (!response.ok) {
-            throw new Error(`小立盘搜索请求失败: ${response.status}`);
+            throw new Error(`搜索请求失败: ${response.status}`);
         }
         
         const html = await response.text();
         
-        // 使用更精确的解析方法
-        const bookDetails = await parseXiaolipanSearchResults(html, query, author);
+        // 解析搜索结果
+        const bookDetails = await parser(html, query, author);
         
         if (bookDetails.length === 0) {
-            console.log("小立盘未找到匹配的书籍");
-            return bookLinks;
+            console.log("未找到匹配的书籍");
+            return [];
         }
         
-        console.log(`小立盘找到 ${bookDetails.length} 个匹配的书籍`);
+        console.log(`找到 ${bookDetails.length} 个匹配的书籍`);
         
         return bookDetails;
         
     } catch (error) {
-        console.error("小立盘爬取失败:", error);
-        return bookLinks;
+        console.error("搜索失败:", error);
+        return [];
     }
+}
+
+// =======================================================
+// 小立盘 (xiaolipan.com) 爬取函数
+// =======================================================
+async function scrapeXiaolipan(query, isbn, author) {
+    // 构建搜索URL
+    const searchUrl = `https://www.xiaolipan.com/search.html?keyword=${encodeURIComponent(query)}`;
+    
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.xiaolipan.com/',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    };
+    
+    return performSearch(searchUrl, headers, parseXiaolipanSearchResults, query, author);
 }
 
 // 解析小立盘搜索结果
@@ -152,7 +158,7 @@ async function parseXiaolipanSearchResults(html, query, author) {
         
         rewriter.on('div.book-item', {
             element(element) {
-                this.bookItem = {
+                this.currentBook = {
                     title: '',
                     url: '',
                     author: ''
@@ -160,9 +166,9 @@ async function parseXiaolipanSearchResults(html, query, author) {
             },
             text(text) {
                 if (text.text.includes('《') && text.text.includes('》')) {
-                    this.bookItem.title = text.text.trim();
+                    this.currentBook.title = text.text.trim();
                 } else if (text.text.includes('作者：')) {
-                    this.bookItem.author = text.text.replace('作者：', '').trim();
+                    this.currentBook.author = text.text.replace('作者：', '').trim();
                 }
             }
         });
@@ -171,7 +177,21 @@ async function parseXiaolipanSearchResults(html, query, author) {
             element(element) {
                 const href = element.getAttribute('href');
                 if (href && href.includes('/p/')) {
-                    this.bookItem.url = `https://www.xiaolipan.com${href}`;
+                    this.currentBook.url = `https://www.xiaolipan.com${href}`;
+                    
+                    // 计算相关性
+                    const relevance = calculateRelevance(this.currentBook.title, query, author || this.currentBook.author);
+                    
+                    if (relevance > 30) {
+                        bookDetails.push({
+                            site: '小立盘',
+                            title: this.currentBook.title,
+                            detailUrl: this.currentBook.url,
+                            downloadUrl: this.currentBook.url.replace('/p/', '/download/'),
+                            format: '详情页',
+                            relevance: relevance
+                        });
+                    }
                 }
             }
         });
@@ -193,7 +213,7 @@ async function parseXiaolipanSearchResults(html, query, author) {
                     // 计算相关性
                     const relevance = calculateRelevance(title, query, author);
                     
-                    if (relevance > 30) { // 设置相关性阈值
+                    if (relevance > 30) {
                         bookDetails.push({
                             site: '小立盘',
                             title: title,
@@ -222,77 +242,92 @@ async function parseXiaolipanSearchResults(html, query, author) {
 // Book5678 (book5678.com) 爬取函数
 // =======================================================
 async function scrapeBook5678(query, isbn, author) {
-    const bookLinks = [];
+    // 构建搜索URL
+    const searchUrl = `https://book5678.com/search.php?q=${encodeURIComponent(query)}`;
     
-    try {
-        // 构建搜索URL
-        const searchUrl = `https://book5678.com/search.php?q=${encodeURIComponent(query)}`;
-        console.log(`Book5678搜索URL: ${searchUrl}`);
-        
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://book5678.com/',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        };
-        
-        // 执行搜索
-        const response = await fetch(searchUrl, { headers });
-        
-        if (!response.ok) {
-            throw new Error(`Book5678搜索请求失败: ${response.status}`);
-        }
-        
-        const html = await response.text();
-        
-        // 解析搜索结果
-        const bookDetails = parseBook5678SearchResults(html, query, author);
-        
-        if (bookDetails.length === 0) {
-            console.log("Book5678未找到匹配的书籍");
-            return bookLinks;
-        }
-        
-        console.log(`Book5678找到 ${bookDetails.length} 个匹配的书籍`);
-        
-        return bookDetails;
-        
-    } catch (error) {
-        console.error("Book5678爬取失败:", error);
-        return bookLinks;
-    }
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://book5678.com/',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    };
+    
+    return performSearch(searchUrl, headers, parseBook5678SearchResults, query, author);
 }
 
 // 解析Book5678搜索结果
-function parseBook5678SearchResults(html, query, author) {
+async function parseBook5678SearchResults(html, query, author) {
     const bookDetails = [];
     
     try {
-        // 使用正则表达式解析搜索结果
-        const regex = /<a[^>]*href="(\/post\/\d+\.html)"[^>]*title="([^"]*)"[^>]*>/g;
-        let match;
+        // 使用HTMLRewriter解析HTML
+        const rewriter = new HTMLRewriter();
         
-        while ((match = regex.exec(html)) !== null) {
-            if (match[1] && match[2]) {
-                const title = match[2].trim();
-                const url = `https://book5678.com${match[1]}`;
+        rewriter.on('div.list-item', {
+            element(element) {
+                this.currentBook = {
+                    title: '',
+                    url: ''
+                };
+            }
+        });
+        
+        rewriter.on('div.list-item h3 a', {
+            element(element) {
+                const href = element.getAttribute('href');
+                if (href && href.includes('/post/')) {
+                    this.currentBook.url = `https://book5678.com${href}`;
+                }
+            },
+            text(text) {
+                this.currentBook.title = text.text.trim();
                 
                 // 计算相关性
-                const relevance = calculateRelevance(title, query, author);
+                const relevance = calculateRelevance(this.currentBook.title, query, author);
                 
-                if (relevance > 30) { // 设置相关性阈值
+                if (relevance > 30 && this.currentBook.url) {
                     bookDetails.push({
                         site: 'Book5678',
-                        title: title,
-                        detailUrl: url,
+                        title: this.currentBook.title,
+                        detailUrl: this.currentBook.url,
                         format: '详情页',
                         relevance: relevance
                     });
+                }
+            }
+        });
+        
+        // 处理转换
+        await rewriter.transform(new Response(html)).text();
+        
+        // 如果没有找到书籍，尝试备用解析方法
+        if (bookDetails.length === 0) {
+            // 使用正则表达式作为备选方案
+            const regex = /<a[^>]*href="(\/post\/\d+\.html)"[^>]*title="([^"]*)"[^>]*>/g;
+            let match;
+            
+            while ((match = regex.exec(html)) !== null) {
+                if (match[1] && match[2]) {
+                    const title = match[2].trim();
+                    const url = `https://book5678.com${match[1]}`;
+                    
+                    // 计算相关性
+                    const relevance = calculateRelevance(title, query, author);
+                    
+                    if (relevance > 30) {
+                        bookDetails.push({
+                            site: 'Book5678',
+                            title: title,
+                            detailUrl: url,
+                            format: '详情页',
+                            relevance: relevance
+                        });
+                    }
                 }
             }
         }
@@ -312,79 +347,97 @@ function parseBook5678SearchResults(html, query, author) {
 // 35PPT (35ppt.com) 爬取函数
 // =======================================================
 async function scrape35PPT(query, isbn, author) {
-    const bookLinks = [];
+    // 构建搜索URL
+    const searchUrl = `https://www.35ppt.com/?s=${encodeURIComponent(query)}`;
     
-    try {
-        // 构建搜索URL
-        const searchUrl = `https://www.35ppt.com/?s=${encodeURIComponent(query)}`;
-        console.log(`35PPT搜索URL: ${searchUrl}`);
-        
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.35ppt.com/',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        };
-        
-        // 执行搜索
-        const response = await fetch(searchUrl, { headers });
-        
-        if (!response.ok) {
-            throw new Error(`35PPT搜索请求失败: ${response.status}`);
-        }
-        
-        const html = await response.text();
-        
-        // 解析搜索结果
-        const bookDetails = parse35PPTSearchResults(html, query, author);
-        
-        if (bookDetails.length === 0) {
-            console.log("35PPT未找到匹配的书籍");
-            return bookLinks;
-        }
-        
-        console.log(`35PPT找到 ${bookDetails.length} 个匹配的书籍`);
-        
-        return bookDetails;
-        
-    } catch (error) {
-        console.error("35PPT爬取失败:", error);
-        return bookLinks;
-    }
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.35ppt.com/',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+    };
+    
+    return performSearch(searchUrl, headers, parse35PPTSearchResults, query, author);
 }
 
 // 解析35PPT搜索结果
-function parse35PPTSearchResults(html, query, author) {
+async function parse35PPTSearchResults(html, query, author) {
     const bookDetails = [];
     
     try {
-        // 使用正则表达式解析搜索结果
-        const regex = /<a[^>]*href="(\/(\d+)\.html)"[^>]*title="([^"]*)"[^>]*>/g;
-        let match;
+        // 使用HTMLRewriter解析HTML
+        const rewriter = new HTMLRewriter();
         
-        while ((match = regex.exec(html)) !== null) {
-            if (match[1] && match[2] && match[3]) {
-                const title = match[3].trim();
-                const url = `https://www.35ppt.com${match[1]}`;
-                const id = match[2];
+        rewriter.on('article', {
+            element(element) {
+                this.currentBook = {
+                    title: '',
+                    url: '',
+                    id: ''
+                };
+            }
+        });
+        
+        rewriter.on('article h2 a', {
+            element(element) {
+                const href = element.getAttribute('href');
+                if (href && /\/\d+\.html$/.test(href)) {
+                    this.currentBook.url = href.startsWith('http') ? href : `https://www.35ppt.com${href}`;
+                    this.currentBook.id = href.match(/\/(\d+)\.html$/)[1];
+                }
+            },
+            text(text) {
+                this.currentBook.title = text.text.trim();
                 
                 // 计算相关性
-                const relevance = calculateRelevance(title, query, author);
+                const relevance = calculateRelevance(this.currentBook.title, query, author);
                 
-                if (relevance > 30) { // 设置相关性阈值
+                if (relevance > 30 && this.currentBook.url && this.currentBook.id) {
                     bookDetails.push({
                         site: '35PPT',
-                        title: title,
-                        detailUrl: url,
-                        downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`,
+                        title: this.currentBook.title,
+                        detailUrl: this.currentBook.url,
+                        downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${this.currentBook.id}`,
                         format: '详情页',
                         relevance: relevance
                     });
+                }
+            }
+        });
+        
+        // 处理转换
+        await rewriter.transform(new Response(html)).text();
+        
+        // 如果没有找到书籍，尝试备用解析方法
+        if (bookDetails.length === 0) {
+            // 使用正则表达式作为备选方案
+            const regex = /<a[^>]*href="(\/(\d+)\.html)"[^>]*title="([^"]*)"[^>]*>/g;
+            let match;
+            
+            while ((match = regex.exec(html)) !== null) {
+                if (match[1] && match[2] && match[3]) {
+                    const title = match[3].trim();
+                    const url = `https://www.35ppt.com${match[1]}`;
+                    const id = match[2];
+                    
+                    // 计算相关性
+                    const relevance = calculateRelevance(title, query, author);
+                    
+                    if (relevance > 30) {
+                        bookDetails.push({
+                            site: '35PPT',
+                            title: title,
+                            detailUrl: url,
+                            downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`,
+                            format: '详情页',
+                            relevance: relevance
+                        });
+                    }
                 }
             }
         }
@@ -439,18 +492,23 @@ function calculateRelevance(title, query, author) {
         score += 100;
     }
     
-    // 5. 检查是否是知名书籍的变体
-    const knownBooks = {
-        "曾国藩传": ["曾国藩传", "曾国藩全传", "曾国藩传记", "曾文正公传"],
-        "曾国藩的正面与侧面": ["曾国藩的正面与侧面", "曾国藩正面与侧面"],
-        "晚清七十年": ["晚清七十年", "晚清70年"],
-        "左宗棠": ["左宗棠", "左文襄公", "左季高"],
-        "左宗棠全传": ["左宗棠全传", "左宗棠传", "左宗棠传记"]
-    };
+    // 5. 检查是否是知名书籍的变体（通用模式）
+    const commonPatterns = [
+        // 中文书籍常见模式
+        { pattern: /传$/, score: 20 }, // 以"传"结尾的可能是传记
+        { pattern: /全书$/, score: 15 }, // 以"全书"结尾的可能是全集
+        { pattern: /教程$/, score: 15 }, // 以"教程"结尾的可能是教学材料
+        { pattern: /指南$/, score: 15 }, // 以"指南"结尾的可能是指导书
+        { pattern: /概论$/, score: 15 }, // 以"概论"结尾的可能是概论书籍
+        { pattern: /原理$/, score: 15 }, // 以"原理"结尾的可能是理论书籍
+        { pattern: /研究$/, score: 15 }, // 以"研究"结尾的可能是研究著作
+        { pattern: /史$/, score: 15 }, // 以"史"结尾的可能是历史书籍
+        { pattern: /论$/, score: 15 }, // 以"论"结尾的可能是论述性书籍
+    ];
     
-    for (const [knownTitle, variants] of Object.entries(knownBooks)) {
-        if (variants.some(variant => lowerTitle.includes(variant.toLowerCase()))) {
-            score += 40;
+    for (const { pattern, score: patternScore } of commonPatterns) {
+        if (pattern.test(lowerTitle)) {
+            score += patternScore;
             break;
         }
     }
