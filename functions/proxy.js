@@ -1,4 +1,4 @@
-// /functions/proxy.js - 可靠的中文图书搜索系统
+// /functions/proxy.js - 改进版图书搜索系统
 
 // =======================================================
 // 主路由函数
@@ -93,7 +93,7 @@ async function handleBookSiteScraper(target, query, isbn, author) {
 }
 
 // =======================================================
-// 小立盘 (xiaolipan.com) 爬取函数
+// 小立盘 (xiaolipan.com) 爬取函数 - 改进版
 // =======================================================
 async function scrapeXiaolipan(query, isbn, author) {
     try {
@@ -121,61 +121,56 @@ async function scrapeXiaolipan(query, isbn, author) {
         }
         
         const html = await response.text();
-        
-        // 使用多种方法解析搜索结果
         const bookDetails = [];
         
-        // 方法1: 使用HTMLRewriter解析
+        // 使用更通用的解析方法
         try {
-            const rewriter = new HTMLRewriter();
+            // 方法1: 使用正则表达式查找所有可能的书籍链接
+            const regex = /<a[^>]*href="(\/p\/[^"]*)"[^>]*>(.*?)<\/a>/gs;
+            let match;
             
-            rewriter.on('a[href*="/p/"]', {
-                element(element) {
-                    const href = element.getAttribute('href');
-                    if (href) {
-                        this.href = `https://www.xiaolipan.com${href}`;
-                    }
-                },
-                text(text) {
-                    if (text.text && text.text.trim()) {
-                        const title = text.text.trim();
-                        const relevance = calculateRelevance(title, query, author);
-                        
-                        if (relevance > 20 && this.href) {
-                            bookDetails.push({
-                                site: '小立盘',
-                                title: title,
-                                detailUrl: this.href,
-                                downloadUrl: this.href.replace('/p/', '/download/'),
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
+            while ((match = regex.exec(html)) !== null) {
+                if (match[1] && match[2]) {
+                    const title = match[2].replace(/<[^>]*>/g, '').trim();
+                    const url = `https://www.xiaolipan.com${match[1]}`;
+                    
+                    // 计算相关性
+                    const relevance = calculateRelevance(title, query, author);
+                    
+                    if (relevance > 5 && title && !title.includes("小立盘")) {
+                        bookDetails.push({
+                            site: '小立盘',
+                            title: title,
+                            detailUrl: url,
+                            downloadUrl: url.replace('/p/', '/download/'),
+                            format: '详情页',
+                            relevance: relevance
+                        });
                     }
                 }
-            });
-            
-            // 处理转换
-            await rewriter.transform(new Response(html)).text();
+            }
         } catch (error) {
-            console.error("HTMLRewriter解析失败:", error);
+            console.error("正则表达式解析失败:", error);
         }
         
-        // 方法2: 使用正则表达式解析
-        if (bookDetails.length === 0) {
-            try {
-                const regex = /<a[^>]*href="(\/p\/\d+\.html)"[^>]*>(.*?)<\/a>/g;
-                let match;
-                
-                while ((match = regex.exec(html)) !== null) {
-                    if (match[1] && match[2]) {
-                        const title = match[2].replace(/<[^>]*>/g, '').trim();
-                        const url = `https://www.xiaolipan.com${match[1]}`;
+        // 方法2: 尝试查找包含特定类的元素
+        try {
+            const itemRegex = /<div[^>]*class="[^"]*item[^"]*"[^>]*>(.*?)<\/div>/gs;
+            let itemMatch;
+            
+            while ((itemMatch = itemRegex.exec(html)) !== null) {
+                if (itemMatch[1]) {
+                    const linkRegex = /<a[^>]*href="(\/p\/[^"]*)"[^>]*>(.*?)<\/a>/;
+                    const linkMatch = linkRegex.exec(itemMatch[1]);
+                    
+                    if (linkMatch && linkMatch[1] && linkMatch[2]) {
+                        const title = linkMatch[2].replace(/<[^>]*>/g, '').trim();
+                        const url = `https://www.xiaolipan.com${linkMatch[1]}`;
                         
                         // 计算相关性
                         const relevance = calculateRelevance(title, query, author);
                         
-                        if (relevance > 20 && title) {
+                        if (relevance > 5 && title && !title.includes("小立盘")) {
                             bookDetails.push({
                                 site: '小立盘',
                                 title: title,
@@ -187,55 +182,24 @@ async function scrapeXiaolipan(query, isbn, author) {
                         }
                     }
                 }
-            } catch (error) {
-                console.error("正则表达式解析失败:", error);
+            }
+        } catch (error) {
+            console.error("项目解析失败:", error);
+        }
+        
+        // 去重并按相关性排序
+        const uniqueBooks = [];
+        const seenTitles = new Set();
+        
+        for (const book of bookDetails) {
+            if (!seenTitles.has(book.title)) {
+                seenTitles.add(book.title);
+                uniqueBooks.push(book);
             }
         }
         
-        // 方法3: 使用更宽松的正则表达式
-        if (bookDetails.length === 0) {
-            try {
-                const regex = /<a[^>]*href="(\/p\/[^"]*)"[^>]*>(.*?)<\/a>/g;
-                let match;
-                
-                while ((match = regex.exec(html)) !== null) {
-                    if (match[1] && match[2]) {
-                        const title = match[2].replace(/<[^>]*>/g, '').trim();
-                        const url = `https://www.xiaolipan.com${match[1]}`;
-                        
-                        // 计算相关性
-                        const relevance = calculateRelevance(title, query, author);
-                        
-                        if (relevance > 10 && title) {
-                            bookDetails.push({
-                                site: '小立盘',
-                                title: title,
-                                detailUrl: url,
-                                downloadUrl: url.replace('/p/', '/download/'),
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("宽松正则表达式解析失败:", error);
-            }
-        }
-        
-        // 方法4: 手动搜索已知书籍
-        if (bookDetails.length === 0) {
-            try {
-                const knownBooks = await searchKnownBooks(query, author);
-                bookDetails.push(...knownBooks);
-            } catch (error) {
-                console.error("已知书籍搜索失败:", error);
-            }
-        }
-        
-        // 按相关性排序并限制结果数量
-        bookDetails.sort((a, b) => b.relevance - a.relevance);
-        return bookDetails.slice(0, 3);
+        uniqueBooks.sort((a, b) => b.relevance - a.relevance);
+        return uniqueBooks.slice(0, 5);
         
     } catch (error) {
         console.error("小立盘爬取失败:", error);
@@ -244,7 +208,7 @@ async function scrapeXiaolipan(query, isbn, author) {
 }
 
 // =======================================================
-// Book5678 (book5678.com) 爬取函数
+// Book5678 (book5678.com) 爬取函数 - 改进版
 // =======================================================
 async function scrapeBook5678(query, isbn, author) {
     try {
@@ -272,60 +236,55 @@ async function scrapeBook5678(query, isbn, author) {
         }
         
         const html = await response.text();
-        
-        // 使用多种方法解析搜索结果
         const bookDetails = [];
         
-        // 方法1: 使用HTMLRewriter解析
+        // 使用更通用的解析方法
         try {
-            const rewriter = new HTMLRewriter();
+            // 方法1: 使用正则表达式查找所有可能的书籍链接
+            const regex = /<a[^>]*href="(\/post\/[^"]*)"[^>]*>(.*?)<\/a>/gs;
+            let match;
             
-            rewriter.on('a[href*="/post/"]', {
-                element(element) {
-                    const href = element.getAttribute('href');
-                    if (href) {
-                        this.href = `https://book5678.com${href}`;
-                    }
-                },
-                text(text) {
-                    if (text.text && text.text.trim()) {
-                        const title = text.text.trim();
-                        const relevance = calculateRelevance(title, query, author);
-                        
-                        if (relevance > 20 && this.href) {
-                            bookDetails.push({
-                                site: 'Book5678',
-                                title: title,
-                                detailUrl: this.href,
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
+            while ((match = regex.exec(html)) !== null) {
+                if (match[1] && match[2]) {
+                    const title = match[2].replace(/<[^>]*>/g, '').trim();
+                    const url = `https://book5678.com${match[1]}`;
+                    
+                    // 计算相关性
+                    const relevance = calculateRelevance(title, query, author);
+                    
+                    if (relevance > 5 && title && !title.includes("Book5678")) {
+                        bookDetails.push({
+                            site: 'Book5678',
+                            title: title,
+                            detailUrl: url,
+                            format: '详情页',
+                            relevance: relevance
+                        });
                     }
                 }
-            });
-            
-            // 处理转换
-            await rewriter.transform(new Response(html)).text();
+            }
         } catch (error) {
-            console.error("HTMLRewriter解析失败:", error);
+            console.error("正则表达式解析失败:", error);
         }
         
-        // 方法2: 使用正则表达式解析
-        if (bookDetails.length === 0) {
-            try {
-                const regex = /<a[^>]*href="(\/post\/\d+\.html)"[^>]*>(.*?)<\/a>/g;
-                let match;
-                
-                while ((match = regex.exec(html)) !== null) {
-                    if (match[1] && match[2]) {
-                        const title = match[2].replace(/<[^>]*>/g, '').trim();
-                        const url = `https://book5678.com${match[1]}`;
+        // 方法2: 尝试查找包含特定类的元素
+        try {
+            const itemRegex = /<div[^>]*class="[^"]*item[^"]*"[^>]*>(.*?)<\/div>/gs;
+            let itemMatch;
+            
+            while ((itemMatch = itemRegex.exec(html)) !== null) {
+                if (itemMatch[1]) {
+                    const linkRegex = /<a[^>]*href="(\/post\/[^"]*)"[^>]*>(.*?)<\/a>/;
+                    const linkMatch = linkRegex.exec(itemMatch[1]);
+                    
+                    if (linkMatch && linkMatch[1] && linkMatch[2]) {
+                        const title = linkMatch[2].replace(/<[^>]*>/g, '').trim();
+                        const url = `https://book5678.com${linkMatch[1]}`;
                         
                         // 计算相关性
                         const relevance = calculateRelevance(title, query, author);
                         
-                        if (relevance > 20 && title) {
+                        if (relevance > 5 && title && !title.includes("Book5678")) {
                             bookDetails.push({
                                 site: 'Book5678',
                                 title: title,
@@ -336,54 +295,24 @@ async function scrapeBook5678(query, isbn, author) {
                         }
                     }
                 }
-            } catch (error) {
-                console.error("正则表达式解析失败:", error);
+            }
+        } catch (error) {
+            console.error("项目解析失败:", error);
+        }
+        
+        // 去重并按相关性排序
+        const uniqueBooks = [];
+        const seenTitles = new Set();
+        
+        for (const book of bookDetails) {
+            if (!seenTitles.has(book.title)) {
+                seenTitles.add(book.title);
+                uniqueBooks.push(book);
             }
         }
         
-        // 方法3: 使用更宽松的正则表达式
-        if (bookDetails.length === 0) {
-            try {
-                const regex = /<a[^>]*href="(\/post\/[^"]*)"[^>]*>(.*?)<\/a>/g;
-                let match;
-                
-                while ((match = regex.exec(html)) !== null) {
-                    if (match[1] && match[2]) {
-                        const title = match[2].replace(/<[^>]*>/g, '').trim();
-                        const url = `https://book5678.com${match[1]}`;
-                        
-                        // 计算相关性
-                        const relevance = calculateRelevance(title, query, author);
-                        
-                        if (relevance > 10 && title) {
-                            bookDetails.push({
-                                site: 'Book5678',
-                                title: title,
-                                detailUrl: url,
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("宽松正则表达式解析失败:", error);
-            }
-        }
-        
-        // 方法4: 手动搜索已知书籍
-        if (bookDetails.length === 0) {
-            try {
-                const knownBooks = await searchKnownBooks(query, author);
-                bookDetails.push(...knownBooks);
-            } catch (error) {
-                console.error("已知书籍搜索失败:", error);
-            }
-        }
-        
-        // 按相关性排序并限制结果数量
-        bookDetails.sort((a, b) => b.relevance - a.relevance);
-        return bookDetails.slice(0, 3);
+        uniqueBooks.sort((a, b) => b.relevance - a.relevance);
+        return uniqueBooks.slice(0, 5);
         
     } catch (error) {
         console.error("Book5678爬取失败:", error);
@@ -392,7 +321,7 @@ async function scrapeBook5678(query, isbn, author) {
 }
 
 // =======================================================
-// 35PPT (35ppt.com) 爬取函数
+// 35PPT (35ppt.com) 爬取函数 - 改进版
 // =======================================================
 async function scrape35PPT(query, isbn, author) {
     try {
@@ -420,248 +349,100 @@ async function scrape35PPT(query, isbn, author) {
         }
         
         const html = await response.text();
-        
-        // 使用多种方法解析搜索结果
         const bookDetails = [];
         
-        // 方法1: 使用HTMLRewriter解析
+        // 使用更通用的解析方法
         try {
-            const rewriter = new HTMLRewriter();
+            // 方法1: 使用正则表达式查找所有可能的书籍链接
+            const regex = /<a[^>]*href="(\/\d+\.html)"[^>]*>(.*?)<\/a>/gs;
+            let match;
             
-            rewriter.on('a[href*="/"][href$=".html"]', {
-                element(element) {
-                    const href = element.getAttribute('href');
-                    if (href && /\/\d+\.html$/.test(href)) {
-                        this.href = href.startsWith('http') ? href : `https://www.35ppt.com${href}`;
-                        this.id = href.match(/\/(\d+)\.html$/)[1];
-                    }
-                },
-                text(text) {
-                    if (text.text && text.text.trim()) {
-                        const title = text.text.trim();
+            while ((match = regex.exec(html)) !== null) {
+                if (match[1] && match[2]) {
+                    const title = match[2].replace(/<[^>]*>/g, '').trim();
+                    const url = `https://www.35ppt.com${match[1]}`;
+                    const idMatch = url.match(/\/(\d+)\.html$/);
+                    
+                    if (idMatch && idMatch[1]) {
+                        const id = idMatch[1];
+                        
+                        // 计算相关性
                         const relevance = calculateRelevance(title, query, author);
                         
-                        if (relevance > 20 && this.href && this.id) {
+                        if (relevance > 5 && title && !title.includes("35PPT")) {
                             bookDetails.push({
                                 site: '35PPT',
                                 title: title,
-                                detailUrl: this.href,
-                                downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${this.id}`,
+                                detailUrl: url,
+                                downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`,
                                 format: '详情页',
                                 relevance: relevance
                             });
                         }
                     }
                 }
-            });
-            
-            // 处理转换
-            await rewriter.transform(new Response(html)).text();
+            }
         } catch (error) {
-            console.error("HTMLRewriter解析失败:", error);
+            console.error("正则表达式解析失败:", error);
         }
         
-        // 方法2: 使用正则表达式解析
-        if (bookDetails.length === 0) {
-            try {
-                const regex = /<a[^>]*href="(\/(\d+)\.html)"[^>]*>(.*?)<\/a>/g;
-                let match;
-                
-                while ((match = regex.exec(html)) !== null) {
-                    if (match[1] && match[2] && match[3]) {
-                        const title = match[3].replace(/<[^>]*>/g, '').trim();
-                        const url = `https://www.35ppt.com${match[1]}`;
-                        const id = match[2];
+        // 方法2: 尝试查找文章元素
+        try {
+            const articleRegex = /<article[^>]*>(.*?)<\/article>/gs;
+            let articleMatch;
+            
+            while ((articleMatch = articleRegex.exec(html)) !== null) {
+                if (articleMatch[1]) {
+                    const linkRegex = /<a[^>]*href="(\/\d+\.html)"[^>]*>(.*?)<\/a>/;
+                    const linkMatch = linkRegex.exec(articleMatch[1]);
+                    
+                    if (linkMatch && linkMatch[1] && linkMatch[2]) {
+                        const title = linkMatch[2].replace(/<[^>]*>/g, '').trim();
+                        const url = `https://www.35ppt.com${linkMatch[1]}`;
+                        const idMatch = url.match(/\/(\d+)\.html$/);
                         
-                        // 计算相关性
-                        const relevance = calculateRelevance(title, query, author);
-                        
-                        if (relevance > 20 && title) {
-                            bookDetails.push({
-                                site: '35PPT',
-                                title: title,
-                                detailUrl: url,
-                                downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`,
-                                format: '详情页',
-                                relevance: relevance
-                            });
+                        if (idMatch && idMatch[1]) {
+                            const id = idMatch[1];
+                            
+                            // 计算相关性
+                            const relevance = calculateRelevance(title, query, author);
+                            
+                            if (relevance > 5 && title && !title.includes("35PPT")) {
+                                bookDetails.push({
+                                    site: '35PPT',
+                                    title: title,
+                                    detailUrl: url,
+                                    downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`,
+                                    format: '详情页',
+                                    relevance: relevance
+                                });
+                            }
                         }
                     }
                 }
-            } catch (error) {
-                console.error("正则表达式解析失败:", error);
+            }
+        } catch (error) {
+            console.error("文章解析失败:", error);
+        }
+        
+        // 去重并按相关性排序
+        const uniqueBooks = [];
+        const seenTitles = new Set();
+        
+        for (const book of bookDetails) {
+            if (!seenTitles.has(book.title)) {
+                seenTitles.add(book.title);
+                uniqueBooks.push(book);
             }
         }
         
-        // 方法3: 使用更宽松的正则表达式
-        if (bookDetails.length === 0) {
-            try {
-                const regex = /<a[^>]*href="(\/\d+\.html)"[^>]*>(.*?)<\/a>/g;
-                let match;
-                
-                while ((match = regex.exec(html)) !== null) {
-                    if (match[1] && match[2]) {
-                        const title = match[2].replace(/<[^>]*>/g, '').trim();
-                        const url = `https://www.35ppt.com${match[1]}`;
-                        const id = url.match(/\/(\d+)\.html$/)[1];
-                        
-                        // 计算相关性
-                        const relevance = calculateRelevance(title, query, author);
-                        
-                        if (relevance > 10 && title) {
-                            bookDetails.push({
-                                site: '35PPT',
-                                title: title,
-                                detailUrl: url,
-                                downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${id}`,
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("宽松正则表达式解析失败:", error);
-            }
-        }
-        
-        // 方法4: 手动搜索已知书籍
-        if (bookDetails.length === 0) {
-            try {
-                const knownBooks = await searchKnownBooks(query, author);
-                bookDetails.push(...knownBooks);
-            } catch (error) {
-                console.error("已知书籍搜索失败:", error);
-            }
-        }
-        
-        // 按相关性排序并限制结果数量
-        bookDetails.sort((a, b) => b.relevance - a.relevance);
-        return bookDetails.slice(0, 3);
+        uniqueBooks.sort((a, b) => b.relevance - a.relevance);
+        return uniqueBooks.slice(0, 5);
         
     } catch (error) {
         console.error("35PPT爬取失败:", error);
         return [];
     }
-}
-
-// =======================================================
-// 已知书籍搜索函数
-// =======================================================
-async function searchKnownBooks(query, author) {
-    const knownBooks = {
-        // 曾国藩相关书籍
-        "曾国藩传": [
-            {
-                site: '小立盘',
-                title: '曾国藩传 - 张宏杰',
-                detailUrl: 'https://www.xiaolipan.com/p/1496858.html',
-                downloadUrl: 'https://www.xiaolipan.com/download/1496858.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: 'Book5678',
-                title: '曾国藩传 - 张宏杰',
-                detailUrl: 'https://book5678.com/post/45150.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: '35PPT',
-                title: '曾国藩传 - 张宏杰',
-                detailUrl: 'https://www.35ppt.com/13459.html',
-                downloadUrl: 'https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=13459',
-                format: '详情页',
-                relevance: 100
-            }
-        ],
-        "曾国藩的正面与侧面": [
-            {
-                site: '小立盘',
-                title: '曾国藩的正面与侧面 - 张宏杰',
-                detailUrl: 'https://www.xiaolipan.com/p/1496860.html',
-                downloadUrl: 'https://www.xiaolipan.com/download/1496860.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: 'Book5678',
-                title: '曾国藩的正面与侧面 - 张宏杰',
-                detailUrl: 'https://book5678.com/post/45151.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: '35PPT',
-                title: '曾国藩的正面与侧面 - 张宏杰',
-                detailUrl: 'https://www.35ppt.com/13460.html',
-                downloadUrl: 'https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=13460',
-                format: '详情页',
-                relevance: 100
-            }
-        ],
-        "晚清七十年": [
-            {
-                site: '小立盘',
-                title: '晚清七十年 - 唐德刚',
-                detailUrl: 'https://www.xiaolipan.com/p/1496862.html',
-                downloadUrl: 'https://www.xiaolipan.com/download/1496862.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: 'Book5678',
-                title: '晚清七十年 - 唐德刚',
-                detailUrl: 'https://book5678.com/post/45152.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: '35PPT',
-                title: '晚清七十年 - 唐德刚',
-                detailUrl: 'https://www.35ppt.com/13461.html',
-                downloadUrl: 'https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=13461',
-                format: '详情页',
-                relevance: 100
-            }
-        ],
-        // 左宗棠相关书籍
-        "左宗棠": [
-            {
-                site: '小立盘',
-                title: '左宗棠全传 - 秦翰才',
-                detailUrl: 'https://www.xiaolipan.com/p/1496864.html',
-                downloadUrl: 'https://www.xiaolipan.com/download/1496864.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: 'Book5678',
-                title: '左宗棠全传 - 秦翰才',
-                detailUrl: 'https://book5678.com/post/45153.html',
-                format: '详情页',
-                relevance: 100
-            },
-            {
-                site: '35PPT',
-                title: '左宗棠全传 - 秦翰才',
-                detailUrl: 'https://www.35ppt.com/13462.html',
-                downloadUrl: 'https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=13462',
-                format: '详情页',
-                relevance: 100
-            }
-        ]
-    };
-    
-    // 查找匹配的已知书籍
-    for (const [key, books] of Object.entries(knownBooks)) {
-        if (query.includes(key) || (author && books[0].title.includes(author))) {
-            return books;
-        }
-    }
-    
-    return [];
 }
 
 // =======================================================
@@ -701,6 +482,16 @@ function calculateRelevance(title, query, author) {
     // 4. 检查是否是完全匹配
     if (lowerTitle === lowerQuery) {
         score += 100;
+    }
+    
+    // 5. 检查标题长度 - 过短的标题可能是导航元素
+    if (title.length < 5) {
+        score -= 50;
+    }
+    
+    // 6. 检查是否包含网站名称 - 排除导航元素
+    if (lowerTitle.includes("小立盘") || lowerTitle.includes("book5678") || lowerTitle.includes("35ppt")) {
+        score -= 100;
     }
     
     return score;
