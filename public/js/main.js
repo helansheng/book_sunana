@@ -406,7 +406,7 @@ resultsContainer.addEventListener('click', async (event) => {
         
         target.textContent = '正在获取...';
         target.disabled = true;
-        linksContainer.innerHTML = '';
+        linksContainer.innerHTML = '<div class="loading-text">正在搜索相关书籍...</div>';
         
         try {
             const bookLinks = await fetchAIResponseWithProxy({ 
@@ -414,6 +414,7 @@ resultsContainer.addEventListener('click', async (event) => {
             });
             
             if (bookLinks && Array.isArray(bookLinks) && bookLinks.length > 0) {
+                linksContainer.innerHTML = '';
                 bookLinks.forEach(link => {
                     const div = document.createElement('div');
                     div.className = 'book-link-item';
@@ -442,7 +443,7 @@ resultsContainer.addEventListener('click', async (event) => {
                     linksContainer.appendChild(div);
                 });
             } else {
-                linksContainer.innerHTML = `<span class="scrape-not-found">未找到相关书籍。</span>`;
+                linksContainer.innerHTML = `<span class="scrape-not-found">未找到相关书籍，请尝试其他资源。</span>`;
             }
         } catch (error) {
             console.error(`${site} scraper failed:`, error);
