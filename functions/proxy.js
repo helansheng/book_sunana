@@ -1,4 +1,4 @@
-// /functions/proxy.js - 完整版本
+// /functions/proxy.js - 完全重写的可靠爬虫
 export async function onRequest(context) {
     const { request } = context;
 
@@ -65,16 +65,10 @@ async function handleBookSiteScraper(target, query, isbn, author) {
         
         console.log(`从 ${target} 获取到 ${bookLinks.length} 个书籍链接`);
         
-        // 如果没有找到结果，尝试备用搜索策略
+        // 如果没有找到结果，尝试使用更通用的搜索方法
         if (bookLinks.length === 0) {
-            console.log(`尝试备用搜索策略: ${query}`);
-            bookLinks = await fallbackSearch(target, query, isbn, author);
-        }
-        
-        // 如果仍然没有结果，尝试使用关键词组合搜索
-        if (bookLinks.length === 0) {
-            console.log(`尝试关键词组合搜索: ${query}`);
-            bookLinks = await keywordCombinationSearch(target, query, isbn, author);
+            console.log(`尝试通用搜索方法: ${query}`);
+            bookLinks = await generalSearch(target, query, isbn, author);
         }
         
         return new Response(JSON.stringify(bookLinks), {
@@ -94,12 +88,68 @@ async function handleBookSiteScraper(target, query, isbn, author) {
     }
 }
 
-// 小立盘爬虫
+// 小立盘爬虫 - 使用API接口而非HTML解析
 async function scrapeXiaolipan(query, isbn, author) {
     try {
-        const encodedQuery = encodeURIComponent(query);
-        const searchUrl = `https://www.xiaolipan.com/search.html?keyword=${encodedQuery}`;
-        console.log(`小立盘搜索URL: ${searchUrl}`);
+        // 小立盘的实际搜索API
+        const searchUrl = `https://www.xiaolipan.com/api/search?keyword=${encodeURIComponent(query)}&page=1`;
+        console.log(`小立盘API搜索URL: ${searchUrl}`);
+        
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.xiaolipan.com/',
+            'X-Requested-With': 'XMLHttpRequest'
+        };
+        
+        const response = await fetch(searchUrl, { headers });
+        
+        if (!response.ok) {
+            console.error(`小立盘API请求失败: ${response.status}`);
+            // 尝试备用方法
+            return await fallbackXiaolipanSearch(query);
+        }
+        
+        const data = await response.json();
+        
+        // 解析API响应
+        const bookDetails = [];
+        if (data && data.data && data.data.list) {
+            data.data.list.forEach(item => {
+                if (item.title && item.id) {
+                    const relevance = calculateRelevance(item.title, query, author);
+                    if (relevance > 10) {
+                        bookDetails.push({
+                            site: '小立盘',
+                            title: item.title,
+                            detailUrl: `https://www.xiaolipan.com/p/${item.id}.html`,
+                            downloadUrl: `https://www.xiaolipan.com/download/${item.id}.html`,
+                            format: '详情页',
+                            relevance: relevance
+                        });
+                    }
+                }
+            });
+        }
+        
+        return bookDetails.slice(0, 5);
+        
+    } catch (error) {
+        console.error("小立盘API爬取失败:", error);
+        // 尝试备用方法
+        return await fallbackXiaolipanSearch(query);
+    }
+}
+
+// 小立盘备用搜索方法
+async function fallbackXiaolipanSearch(query) {
+    try {
+        // 尝试直接访问小立盘并模拟用户搜索
+        const searchUrl = `https://www.xiaolipan.com/search.html?keyword=${encodeURIComponent(query)}`;
+        console.log(`小立盘备用搜索URL: ${searchUrl}`);
         
         const headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -108,121 +158,56 @@ async function scrapeXiaolipan(query, isbn, author) {
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.xiaolipan.com/',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1'
+            'Referer': 'https://www.xiaolipan.com/'
         };
-        
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
         
         const response = await fetch(searchUrl, { headers });
         
         if (!response.ok) {
-            console.error(`小立盘搜索请求失败: ${response.status}`);
+            console.error(`小立盘备用搜索请求失败: ${response.status}`);
             return [];
         }
         
         const html = await response.text();
+        
+        // 使用正则表达式提取书籍信息
         const bookDetails = [];
+        const regex = /<a[^>]*href="(\/p\/\d+\.html)"[^>]*title="([^"]*)"[^>]*>/g;
+        let match;
         
-        // 方法1: 使用正则表达式匹配
-        try {
-            const regex = /<a[^>]*href="(\/p\/[^"]*)"[^>]*>([^<]*)<\/a>/g;
-            let match;
-            
-            while ((match = regex.exec(html)) !== null) {
-                if (match[1] && match[2]) {
-                    const title = match[2].trim();
-                    const url = `https://www.xiaolipan.com${match[1]}`;
-                    
-                    if (title && title.length > 5 && !isNavigationElement(title)) {
-                        const relevance = calculateRelevance(title, query, author);
-                        if (relevance > 10) {
-                            bookDetails.push({
-                                site: '小立盘',
-                                title: title,
-                                detailUrl: url,
-                                downloadUrl: url.replace('/p/', '/download/'),
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.error("正则表达式解析失败:", error);
-        }
-        
-        // 方法2: 尝试查找包含特定类的元素
-        if (bookDetails.length === 0) {
-            try {
-                const itemRegex = /<div[^>]*class="[^"]*item[^"]*"[^>]*>(.*?)<\/div>/gs;
-                let itemMatch;
+        while ((match = regex.exec(html)) !== null) {
+            if (match[1] && match[2]) {
+                const title = match[2].trim();
+                const url = `https://www.xiaolipan.com${match[1]}`;
                 
-                while ((itemMatch = itemRegex.exec(html)) !== null) {
-                    if (itemMatch[1]) {
-                        const linkRegex = /<a[^>]*href="(\/p\/[^"]*)"[^>]*>([^<]*)<\/a>/;
-                        const linkMatch = linkRegex.exec(itemMatch[1]);
-                        
-                        if (linkMatch && linkMatch[1] && linkMatch[2]) {
-                            const title = linkMatch[2].trim();
-                            const url = `https://www.xiaolipan.com${linkMatch[1]}`;
-                            
-                            if (title && title.length > 5 && !isNavigationElement(title)) {
-                                const relevance = calculateRelevance(title, query, author);
-                                if (relevance > 10) {
-                                    bookDetails.push({
-                                        site: '小立盘',
-                                        title: title,
-                                        detailUrl: url,
-                                        downloadUrl: url.replace('/p/', '/download/'),
-                                        format: '详情页',
-                                        relevance: relevance
-                                    });
-                                }
-                            }
-                        }
+                if (title && title.length > 5) {
+                    const relevance = calculateRelevance(title, query, '');
+                    if (relevance > 10) {
+                        bookDetails.push({
+                            site: '小立盘',
+                            title: title,
+                            detailUrl: url,
+                            downloadUrl: url.replace('/p/', '/download/'),
+                            format: '详情页',
+                            relevance: relevance
+                        });
                     }
                 }
-            } catch (error) {
-                console.error("项目解析失败:", error);
             }
         }
         
-        // 去重并按相关性排序
-        const uniqueBooks = [];
-        const seenUrls = new Set();
-        
-        for (const book of bookDetails) {
-            if (!seenUrls.has(book.detailUrl)) {
-                seenUrls.add(book.detailUrl);
-                uniqueBooks.push(book);
-            }
-        }
-        
-        uniqueBooks.sort((a, b) => b.relevance - a.relevance);
-        console.log(`小立盘找到 ${uniqueBooks.length} 个相关书籍`);
-        return uniqueBooks.slice(0, 5);
+        return bookDetails.slice(0, 5);
         
     } catch (error) {
-        console.error("小立盘爬取失败:", error);
+        console.error("小立盘备用搜索失败:", error);
         return [];
     }
 }
 
-// Book5678爬虫
+// Book5678爬虫 - 使用更精确的解析方法
 async function scrapeBook5678(query, isbn, author) {
     try {
-        const encodedQuery = encodeURIComponent(query);
-        const searchUrl = `https://book5678.com/search.php?q=${encodedQuery}`;
+        const searchUrl = `https://book5678.com/search.php?q=${encodeURIComponent(query)}`;
         console.log(`Book5678搜索URL: ${searchUrl}`);
         
         const headers = {
@@ -232,19 +217,8 @@ async function scrapeBook5678(query, isbn, author) {
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://book5678.com/',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1'
+            'Referer': 'https://book5678.com/'
         };
-        
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
         
         const response = await fetch(searchUrl, { headers });
         
@@ -254,85 +228,49 @@ async function scrapeBook5678(query, isbn, author) {
         }
         
         const html = await response.text();
+        
+        // 使用HTMLRewriter解析HTML
         const bookDetails = [];
         
-        // 使用正则表达式匹配
-        try {
-            const regex = /<a[^>]*href="(\/post\/[^"]*)"[^>]*>([^<]*)<\/a>/g;
-            let match;
-            
-            while ((match = regex.exec(html)) !== null) {
-                if (match[1] && match[2]) {
-                    const title = match[2].trim();
-                    const url = `https://book5678.com${match[1]}`;
-                    
-                    if (title && title.length > 5 && !isNavigationElement(title)) {
-                        const relevance = calculateRelevance(title, query, author);
+        await new HTMLRewriter()
+            .on('div.list-group-item', {
+                element(element) {
+                    this.currentItem = { href: '', title: '' };
+                }
+            })
+            .on('div.list-group-item a[href^="/post/"]', {
+                element(element) {
+                    const href = element.getAttribute('href');
+                    if (href) {
+                        this.currentItem.href = `https://book5678.com${href}`;
+                    }
+                },
+                text(text) {
+                    if (text.text && text.lastInTextNode) {
+                        this.currentItem.title = text.text.trim();
+                    }
+                }
+            })
+            .on('div.list-group-item', {
+                element(element) {
+                    if (this.currentItem.title && this.currentItem.href) {
+                        const relevance = calculateRelevance(this.currentItem.title, query, author);
                         if (relevance > 10) {
                             bookDetails.push({
                                 site: 'Book5678',
-                                title: title,
-                                detailUrl: url,
+                                title: this.currentItem.title,
+                                detailUrl: this.currentItem.href,
                                 format: '详情页',
                                 relevance: relevance
                             });
                         }
                     }
                 }
-            }
-        } catch (error) {
-            console.error("正则表达式解析失败:", error);
-        }
+            })
+            .transform(new Response(html))
+            .text();
         
-        // 尝试查找包含特定类的元素
-        if (bookDetails.length === 0) {
-            try {
-                const itemRegex = /<div[^>]*class="[^"]*item[^"]*"[^>]*>(.*?)<\/div>/gs;
-                let itemMatch;
-                
-                while ((itemMatch = itemRegex.exec(html)) !== null) {
-                    if (itemMatch[1]) {
-                        const linkRegex = /<a[^>]*href="(\/post\/[^"]*)"[^>]*>([^<]*)<\/a>/;
-                        const linkMatch = linkRegex.exec(itemMatch[1]);
-                        
-                        if (linkMatch && linkMatch[1] && linkMatch[2]) {
-                            const title = linkMatch[2].trim();
-                            const url = `https://book5678.com${linkMatch[1]}`;
-                            
-                            if (title && title.length > 5 && !isNavigationElement(title)) {
-                                const relevance = calculateRelevance(title, query, author);
-                                if (relevance > 10) {
-                                    bookDetails.push({
-                                        site: 'Book5678',
-                                        title: title,
-                                        detailUrl: url,
-                                        format: '详情页',
-                                        relevance: relevance
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("项目解析失败:", error);
-            }
-        }
-        
-        // 去重并按相关性排序
-        const uniqueBooks = [];
-        const seenUrls = new Set();
-        
-        for (const book of bookDetails) {
-            if (!seenUrls.has(book.detailUrl)) {
-                seenUrls.add(book.detailUrl);
-                uniqueBooks.push(book);
-            }
-        }
-        
-        uniqueBooks.sort((a, b) => b.relevance - a.relevance);
-        console.log(`Book5678找到 ${uniqueBooks.length} 个相关书籍`);
-        return uniqueBooks.slice(0, 5);
+        return bookDetails.slice(0, 5);
         
     } catch (error) {
         console.error("Book5678爬取失败:", error);
@@ -340,11 +278,10 @@ async function scrapeBook5678(query, isbn, author) {
     }
 }
 
-// 35PPT爬虫
+// 35PPT爬虫 - 使用更精确的解析方法
 async function scrape35PPT(query, isbn, author) {
     try {
-        const encodedQuery = encodeURIComponent(query);
-        const searchUrl = `https://www.35ppt.com/?s=${encodedQuery}`;
+        const searchUrl = `https://www.35ppt.com/?s=${encodeURIComponent(query)}`;
         console.log(`35PPT搜索URL: ${searchUrl}`);
         
         const headers = {
@@ -354,19 +291,8 @@ async function scrape35PPT(query, isbn, author) {
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'Referer': 'https://www.35ppt.com/',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1'
+            'Referer': 'https://www.35ppt.com/'
         };
-        
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1000));
         
         const response = await fetch(searchUrl, { headers });
         
@@ -376,89 +302,53 @@ async function scrape35PPT(query, isbn, author) {
         }
         
         const html = await response.text();
+        
+        // 使用HTMLRewriter解析HTML
         const bookDetails = [];
         
-        // 使用正则表达式匹配
-        try {
-            const regex = /<a[^>]*href="(\/\d+\.html)"[^>]*>([^<]*)<\/a>/g;
-            let match;
-            
-            while ((match = regex.exec(html)) !== null) {
-                if (match[1] && match[2]) {
-                    const title = match[2].trim();
-                    const url = `https://www.35ppt.com${match[1]}`;
-                    const idMatch = url.match(/\/(\d+)\.html$/);
-                    
-                    if (title && title.length > 5 && !isNavigationElement(title) && idMatch && idMatch[1]) {
-                        const relevance = calculateRelevance(title, query, author);
-                        if (relevance > 10) {
-                            bookDetails.push({
-                                site: '35PPT',
-                                title: title,
-                                detailUrl: url,
-                                downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${idMatch[1]}`,
-                                format: '详情页',
-                                relevance: relevance
-                            });
-                        }
+        await new HTMLRewriter()
+            .on('article', {
+                element(element) {
+                    this.currentItem = { href: '', title: '' };
+                }
+            })
+            .on('article h2 a', {
+                element(element) {
+                    const href = element.getAttribute('href');
+                    if (href) {
+                        this.currentItem.href = href;
+                    }
+                },
+                text(text) {
+                    if (text.text && text.lastInTextNode) {
+                        this.currentItem.title = text.text.trim();
                     }
                 }
-            }
-        } catch (error) {
-            console.error("正则表达式解析失败:", error);
-        }
-        
-        // 尝试查找文章元素
-        if (bookDetails.length === 0) {
-            try {
-                const articleRegex = /<article[^>]*>(.*?)<\/article>/gs;
-                let articleMatch;
-                
-                while ((articleMatch = articleRegex.exec(html)) !== null) {
-                    if (articleMatch[1]) {
-                        const linkRegex = /<a[^>]*href="(\/\d+\.html)"[^>]*>([^<]*)<\/a>/;
-                        const linkMatch = linkRegex.exec(articleMatch[1]);
-                        
-                        if (linkMatch && linkMatch[1] && linkMatch[2]) {
-                            const title = linkMatch[2].trim();
-                            const url = `https://www.35ppt.com${linkMatch[1]}`;
-                            const idMatch = url.match(/\/(\d+)\.html$/);
-                            
-                            if (title && title.length > 5 && !isNavigationElement(title) && idMatch && idMatch[1]) {
-                                const relevance = calculateRelevance(title, query, author);
-                                if (relevance > 10) {
-                                    bookDetails.push({
-                                        site: '35PPT',
-                                        title: title,
-                                        detailUrl: url,
-                                        downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${idMatch[1]}`,
-                                        format: '详情页',
-                                        relevance: relevance
-                                    });
-                                }
+            })
+            .on('article', {
+                element(element) {
+                    if (this.currentItem.title && this.currentItem.href) {
+                        const idMatch = this.currentItem.href.match(/\/(\d+)\.html$/);
+                        if (idMatch && idMatch[1]) {
+                            const relevance = calculateRelevance(this.currentItem.title, query, author);
+                            if (relevance > 10) {
+                                bookDetails.push({
+                                    site: '35PPT',
+                                    title: this.currentItem.title,
+                                    detailUrl: this.currentItem.href,
+                                    downloadUrl: `https://www.35ppt.com/wp-content/plugins/ordown/down.php?id=${idMatch[1]}`,
+                                    format: '详情页',
+                                    relevance: relevance
+                                });
                             }
                         }
                     }
                 }
-            } catch (error) {
-                console.error("文章解析失败:", error);
-            }
-        }
+            })
+            .transform(new Response(html))
+            .text();
         
-        // 去重并按相关性排序
-        const uniqueBooks = [];
-        const seenUrls = new Set();
-        
-        for (const book of bookDetails) {
-            if (!seenUrls.has(book.detailUrl)) {
-                seenUrls.add(book.detailUrl);
-                uniqueBooks.push(book);
-            }
-        }
-        
-        uniqueBooks.sort((a, b) => b.relevance - a.relevance);
-        console.log(`35PPT找到 ${uniqueBooks.length} 个相关书籍`);
-        return uniqueBooks.slice(0, 5);
+        return bookDetails.slice(0, 5);
         
     } catch (error) {
         console.error("35PPT爬取失败:", error);
@@ -466,61 +356,16 @@ async function scrape35PPT(query, isbn, author) {
     }
 }
 
-// 备用搜索策略
-async function fallbackSearch(target, query, isbn, author) {
-    console.log(`使用备用搜索策略: ${target} - ${query}`);
+// 通用搜索方法
+async function generalSearch(target, query, isbn, author) {
+    console.log(`使用通用搜索方法: ${target} - ${query}`);
     
-    // 尝试拆分查询词
-    const queryWords = query.split(/\s+/);
+    // 提取关键词
+    const keywords = extractKeywords(query);
     let results = [];
     
-    // 尝试使用单个关键词搜索
-    for (const word of queryWords) {
-        if (word.length > 1) {
-            let wordResults = [];
-            
-            switch (target) {
-                case 'xiaolipan':
-                    wordResults = await scrapeXiaolipan(word, isbn, author);
-                    break;
-                case 'book5678':
-                    wordResults = await scrapeBook5678(word, isbn, author);
-                    break;
-                case '35ppt':
-                    wordResults = await scrape35PPT(word, isbn, author);
-                    break;
-            }
-            
-            results = [...results, ...wordResults];
-            await new Promise(resolve => setTimeout(resolve, 800));
-        }
-    }
-    
-    // 去重并按相关性排序
-    const uniqueBooks = [];
-    const seenUrls = new Set();
-    
-    for (const book of results) {
-        if (!seenUrls.has(book.detailUrl)) {
-            seenUrls.add(book.detailUrl);
-            uniqueBooks.push(book);
-        }
-    }
-    
-    uniqueBooks.sort((a, b) => b.relevance - a.relevance);
-    return uniqueBooks.slice(0, 5);
-}
-
-// 关键词组合搜索策略
-async function keywordCombinationSearch(target, query, isbn, author) {
-    console.log(`使用关键词组合搜索策略: ${target} - ${query}`);
-    
-    const extractedKeywords = extractKeywordsFromQuery(query);
-    console.log(`从查询中提取的关键词: ${extractedKeywords.join(', ')}`);
-    
-    let results = [];
-    
-    for (const keyword of extractedKeywords) {
+    // 尝试使用每个关键词进行搜索
+    for (const keyword of keywords) {
         let keywordResults = [];
         
         switch (target) {
@@ -536,29 +381,9 @@ async function keywordCombinationSearch(target, query, isbn, author) {
         }
         
         results = [...results, ...keywordResults];
-        await new Promise(resolve => setTimeout(resolve, 800));
-    }
-    
-    // 如果仍然没有结果，尝试使用原始查询的简化版本
-    if (results.length === 0) {
-        const simplifiedQuery = simplifyQuery(query);
-        console.log(`尝试简化查询: ${simplifiedQuery}`);
         
-        let simplifiedResults = [];
-        
-        switch (target) {
-            case 'xiaolipan':
-                simplifiedResults = await scrapeXiaolipan(simplifiedQuery, isbn, author);
-                break;
-            case 'book5678':
-                simplifiedResults = await scrapeBook5678(simplifiedQuery, isbn, author);
-                break;
-            case '35ppt':
-                simplifiedResults = await scrape35PPT(simplifiedQuery, isbn, author);
-                break;
-        }
-        
-        results = [...results, ...simplifiedResults];
+        // 添加延迟避免请求过快
+        await new Promise(resolve => setTimeout(resolve, 500));
     }
     
     // 去重并按相关性排序
@@ -577,7 +402,8 @@ async function keywordCombinationSearch(target, query, isbn, author) {
 }
 
 // 从查询中提取关键词
-function extractKeywordsFromQuery(query) {
+function extractKeywords(query) {
+    // 移除常见停用词
     const stopWords = new Set([
         '我想', '了解', '学习', '阅读', '关于', '的', '和', '与', '及', '以及',
         '一些', '各种', '多种', '不同', '相关', '方面', '领域', '知识',
@@ -586,46 +412,10 @@ function extractKeywordsFromQuery(query) {
         '一个', '一种', '一本', '一部', '一套', '一系列'
     ]);
     
-    const words = query.split(/[\s\u3000\u200b]+/).filter(word => 
-        word.length > 1 && !stopWords.has(word)
-    );
-    
-    if (words.length < 2) {
-        const chars = query.split('').filter(char => 
-            char.trim() && !stopWords.has(char) && char !== ' ' && char !== '\u3000'
-        );
-        
-        const combinedWords = [];
-        for (let i = 0; i < chars.length - 1; i++) {
-            combinedWords.push(chars[i] + chars[i + 1]);
-        }
-        
-        return Array.from(new Set(combinedWords)).slice(0, 5);
-    }
-    
-    return Array.from(new Set(words)).slice(0, 5);
-}
-
-// 简化查询
-function simplifyQuery(query) {
-    const simplified = query
-        .replace(/(我想|了解|学习|阅读|关于|的|和|与|及|以及|一些|各种|多种|不同|相关|方面|领域|知识)/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    
-    return simplified || query;
-}
-
-// 检查是否是导航元素
-function isNavigationElement(title) {
-    const lowerTitle = title.toLowerCase();
-    const navigationTerms = [
-        "首页", "关于我们", "联系我们", "登录", "注册", "搜索",
-        "home", "about", "contact", "login", "signup", "search",
-        "小立盘", "book5678", "35ppt", "网站", "导航", "菜单"
-    ];
-    
-    return navigationTerms.some(term => lowerTitle.includes(term.toLowerCase()));
+    // 将查询分割为词语并过滤停用词
+    return query.split(/[\s\u3000\u200b]+/)
+        .filter(word => word.length > 1 && !stopWords.has(word))
+        .slice(0, 5);
 }
 
 // 智能相关性计算函数
@@ -636,45 +426,36 @@ function calculateRelevance(title, query, author) {
     const lowerQuery = query.toLowerCase();
     const lowerAuthor = author ? author.toLowerCase() : '';
     
+    // 检查标题是否完全包含查询词
     if (lowerTitle.includes(lowerQuery)) {
         score += 50;
     }
     
+    // 检查标题是否包含查询词的主要部分
     const queryWords = lowerQuery.split(/\s+/);
-    let matchedWords = 0;
-    
     for (const word of queryWords) {
         if (word.length > 1 && lowerTitle.includes(word)) {
-            matchedWords++;
             score += 15;
         }
     }
     
+    // 检查标题是否包含作者名
     if (lowerAuthor && lowerTitle.includes(lowerAuthor)) {
         score += 30;
     }
     
+    // 检查是否是完全匹配
     if (lowerTitle === lowerQuery) {
         score += 100;
     }
     
-    if (lowerTitle.includes("曾国藩")) {
-        score += 40;
-    }
-    
-    if (lowerTitle.includes("晚清")) {
-        score += 20;
-    }
-    
-    if (lowerTitle.includes("中兴")) {
-        score += 20;
-    }
-    
+    // 检查标题长度 - 过短的标题可能是导航元素
     if (title.length < 5) {
         score -= 50;
     }
     
-    if (isNavigationElement(title)) {
+    // 检查是否包含网站名称 - 排除导航元素
+    if (lowerTitle.includes("小立盘") || lowerTitle.includes("book5678") || lowerTitle.includes("35ppt")) {
         score -= 100;
     }
     
