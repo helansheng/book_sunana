@@ -1,4 +1,4 @@
-/* public/css/style.css - 优化中文网站按钮样式 */
+/* public/css/style.css - 完整版本 */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;700&display=swap');
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Noto Sans SC', sans-serif; color: #333; background-color: #f4f7f6; line-height: 1.6; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 20px; }
@@ -58,175 +58,54 @@ footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1p
 .mirror-link-error { color: #999; font-style: italic; }
 .official-link { font-weight: bold; background-color: #ecf0f1; }
 .official-link::after { content: ' (Official)'; font-size: 0.8em; color: #27ae60; margin-left: 4px; }
-@media (max-width: 768px) {
-    body { padding: 10px; }
-    .main-container { padding: 20px; }
-    header h1 { font-size: 2rem; }
-}
 
-/* 新增：为备用链接中的特殊说明添加样式 */
-.fallback-item-with-note {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-right: 10px;
-    margin-bottom: 5px;
-}
-.fallback-note {
-    font-size: 0.8em;
-    color: #7f8c8d; /* 使用一种柔和的灰色 */
-    margin-left: 5px;
-}
-
-/* 中文网站按钮样式优化 */
+/* 新增：中文网站搜索按钮样式 */
 .chinese-sites-container {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
     margin-top: 15px;
-    width: 100%;
 }
 
-.scrape-btn {
-    padding: 12px 16px;
-    border: none;
-    border-radius: 6px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
+.search-link-btn {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    min-width: 140px;
-    font-size: 0.95rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.scrape-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
-
-.scrape-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-}
-
-/* 小立盘按钮样式 */
-.scrape-btn[data-target="xiaolipan"] {
-    background-color: #3498db;
-    color: white;
-}
-
-.scrape-btn[data-target="xiaolipan"]:hover:not(:disabled) {
-    background-color: #2980b9;
-}
-
-/* Book5678按钮样式 */
-.scrape-btn[data-target="book5678"] {
-    background-color: #2ecc71;
-    color: white;
-}
-
-.scrape-btn[data-target="book5678"]:hover:not(:disabled) {
-    background-color: #27ae60;
-}
-
-/* 35PPT按钮样式 */
-.scrape-btn[data-target="35ppt"] {
-    background-color: #9b59b6;
-    color: white;
-}
-
-.scrape-btn[data-target="35ppt"]:hover:not(:disabled) {
-    background-color: #8e44ad;
-}
-
-.direct-links-container {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 15px;
-    width: 100%;
-}
-
-.book-link-item {
-    padding: 10px;
-    background-color: #f8f9fa;
-    border-radius: 5px;
-    border-left: 3px solid #3498db;
-}
-
-.book-detail-link {
-    color: #2c3e50;
+    padding: 10px 15px;
+    border-radius: 10px;
     text-decoration: none;
-    font-weight: 500;
-    display: block;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    color: white;
 }
 
-.book-detail-link:hover {
-    color: #3498db;
-    text-decoration: underline;
+.search-link-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 
-.scrape-not-found {
-    color: #95a5a6;
-    font-style: italic;
-    font-size: 0.9em;
-    padding: 10px;
+.xiaolipan-btn {
+    background-color: #3498db;
 }
 
-/* 响应式调整 */
-@media (max-width: 600px) {
+.book5678-btn {
+    background-color: #e74c3c;
+}
+
+.ppt35-btn {
+    background-color: #9b59b6;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    body { padding: 10px; }
+    .main-container { padding: 20px; }
+    header h1 { font-size: 2rem; }
     .chinese-sites-container {
         flex-direction: column;
     }
-    
-    .scrape-btn {
+    .search-link-btn {
         width: 100%;
+        justify-content: center;
     }
-}
-
-/* 在style.css中添加以下样式 */
-.book-link-item {
-    margin-bottom: 10px;
-    padding: 8px;
-    border: 1px solid #eee;
-    border-radius: 4px;
-    background-color: #f9f9f9;
-}
-
-.book-detail-link {
-    color: #3498db;
-    text-decoration: none;
-    font-weight: bold;
-    display: block;
-    margin-bottom: 5px;
-}
-
-.book-link-button {
-    padding: 5px 10px;
-    color: white;
-    text-decoration: none;
-    border-radius: 3px;
-    font-size: 0.9em;
-    display: inline-block;
-    margin-right: 10px;
-}
-
-.book-link-button:hover {
-    opacity: 0.9;
-}
-
-.scrape-not-found {
-    color: #95a5a6;
-    font-style: italic;
-    font-size: 0.9em;
-}
-
-.loading-text {
-    color: #7f8c8d;
-    font-style: italic;
 }
